@@ -14,7 +14,7 @@
 | 后端框架 | Spring Boot |
 | 数据库 | MySQL 8.x |
 | 缓存 / 分布式 | Redis |
-| 前端 | Vue |
+| 前端 | Vue 3 + Vite + TypeScript |
 | 外部集成 | 钉钉审批、邮件、招聘渠道适配层 |
 
 ---
@@ -84,12 +84,17 @@
 
 ```
 recruit-platform/
-├── docs/       # 设计文档：总体架构设计、数据库设计
-├── research/   # 调研资料：渠道 API、钉钉 AI 面试
-├── server/     # Spring Boot 后端（待建）
-├── client/     # Vue 前端（待建）
+├── recruit-server/   # Spring Boot 后端（Java 17 / Maven，待建）；内有 AGENTS.md
+├── recruit-web/      # Vue 3 前端（Vite + TypeScript，待建）；内有 AGENTS.md
+├── docs/             # 设计文档：总体架构设计、数据库设计
+├── research/         # 调研资料：渠道 API、钉钉 AI 面试
+├── .agent/skills/    # AI 协作技能（SKILL.md）
+├── AGENTS.md         # AI 协作约定：工作原则 + 任务导航
 └── README.md
 ```
+
+> 前后端各自独立构建、独立运行，不共用构建产物；根目录不放工程代码。
+> AI 协作约定见根 `AGENTS.md`，各工作区约束见 `recruit-server/AGENTS.md`、`recruit-web/AGENTS.md`。
 
 > 约定：表名小写下划线、主键 `BIGINT UNSIGNED` 雪花 ID、状态用 `VARCHAR(32)` 不用 MySQL `ENUM`、
 > 时间统一 `DATETIME(3)` 按 UTC 存储、金额 `DECIMAL(18,2)`。
