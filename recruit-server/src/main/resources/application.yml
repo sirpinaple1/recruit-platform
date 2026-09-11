@@ -1,0 +1,25 @@
+server:
+  port: 6017
+
+spring:
+  application:
+    name: recruit-server
+  profiles:
+    active: dev
+  # 时间统一按 UTC 存储与序列化（见 README 数据约定）
+  jackson:
+    time-zone: UTC
+    date-format: yyyy-MM-dd HH:mm:ss
+
+mybatis-plus:
+  # Mapper XML 存放位置
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.recruit.entity
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      # 主键用雪花 ID（BIGINT UNSIGNED，见 README 数据约定）
+      id-type: assign_id
+      table-underline: true
