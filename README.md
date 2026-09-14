@@ -10,11 +10,12 @@
 
 | 层次 | 选型 |
 |---|---|
-| 语言 / 运行时 | Java 17 |
-| 后端框架 | Spring Boot |
+| 语言 / 运行时 | Java 17 + Python 3.11 |
+| 后端框架 | Spring Boot + FastAPI |
 | 数据库 | MySQL 8.x |
 | 缓存 / 分布式 | Redis |
 | 前端 | Vue 3 + Vite + TypeScript |
+| AI 能力 | Ollama + LangChain / 智谱AI |
 | 外部集成 | 钉钉审批、邮件、招聘渠道适配层 |
 
 ---
@@ -28,6 +29,15 @@
 ### 业务主状态与外部状态分离
 
 不用一个 `status` 表示整个系统。人力需求状态、渠道发布状态、候选人申请状态、面试轮次状态、钉钉审批状态、通知发送状态各自独立保存，通过领域事件协作 —— 避免「一个外部平台失败导致整个候选人状态不可解释」。
+
+### AI 能力渐进式本地化
+
+采用 **Java 业务 + Python AI 服务分离架构**，通过 HTTP/MQ 通信。AI 能力分三阶段演进：
+1. **MVP阶段**：云端 API（智谱AI）快速验证 + 数据积累
+2. **优化阶段**：关键路径本地化（Ollama + Qwen），成本降低 90%
+3. **深度阶段**：端到端训练 + Agent 编排
+
+详见 `docs/architecture/ai-integration-architecture.md`
 
 ### 自动化必须有人工兜底
 
@@ -70,7 +80,7 @@
   → 回调验签解密、幂等落库 → 创建人力需求单
   → 各渠道发布（授权 API 自动发布 / 无接口则生成 HR 人工待办）
   → 上传简历或从人才库推荐 → 创建候选人申请
-  → 简历接受审批（钉钉） → 沟通与面试准备
+  → AI 简历解析与评分 → 简历接受审批（钉钉） → 沟通与面试准备
   → 安排线上 / 线下面试 → 面试结果留存 → 领导轮次决策
   → 录用审批（钉钉） → 生成录用通知书 → 邮件发送 / HR 下载发送
   → 登记已报到 / 未报到 → 创建各渠道下架任务
@@ -84,17 +94,18 @@
 
 ```
 recruit-platform/
-├── recruit-server/   # Spring Boot 后端（Java 17 / Maven，待建）；内有 AGENTS.md
-├── recruit-web/      # Vue 3 前端（Vite + TypeScript，待建）；内有 AGENTS.md
-├── docs/             # 设计文档：总体架构设计、数据库设计
-├── research/         # 调研资料：渠道 API、钉钉 AI 面试
-├── .agent/skills/    # AI 协作技能（SKILL.md）
-├── AGENTS.md         # AI 协作约定：工作原则 + 任务导航
+├── recruit-server/      # Spring Boot 后端（Java 17 / Maven）；内有 AGENTS.md
+├── recruit-ai-service/  # FastAPI AI 服务（Python 3.11）；内有 AGENTS.md
+├── recruit-web/         # Vue 3 前端（Vite + TypeScript，待建）；内有 AGENTS.md
+├── docs/                # 设计文档：架构设计、数据库设计、AI 集成方案
+├── research/            # 调研资料：渠道 API、钉钉 AI 面试
+├── .agent/skills/       # AI 协作技能（SKILL.md）
+├── AGENTS.md            # AI 协作约定：工作原则 + 任务导航
 └── README.md
 ```
 
 > 前后端各自独立构建、独立运行，不共用构建产物；根目录不放工程代码。
-> AI 协作约定见根 `AGENTS.md`，各工作区约束见 `recruit-server/AGENTS.md`、`recruit-web/AGENTS.md`。
+> AI 协作约定见根 `AGENTS.md`，各工作区约束见各子目录的 `AGENTS.md`。
 
 > 约定：表名小写下划线、主键 `BIGINT UNSIGNED` 雪花 ID、状态用 `VARCHAR(32)` 不用 MySQL `ENUM`、
 > 时间统一 `DATETIME(3)` 按 UTC 存储、金额 `DECIMAL(18,2)`。
@@ -106,10 +117,12 @@ recruit-platform/
 | 依赖 | 版本 |
 |---|---|
 | JDK | 17 |
+| Python | 3.11+ |
 | Maven | 3.8+ |
 | MySQL | 8.x |
 | Redis | 6+ |
 | Node.js | 18+（前端） |
+| Ollama | latest（可选，本地 AI 推理） |
 
 ---
 
@@ -117,12 +130,17 @@ recruit-platform/
 
 | 阶段 | 目标 |
 |---|---|
-| 阶段一 | 可控闭环 MVP |
-| 阶段二 | 授权集成 |
-| 阶段三 | 数据治理与分析 |
+| 阶段一 | 可控闭环 MVP + AI 云端验证 |
+| 阶段二 | 授权集成 + AI 本地化 |
+| 阶段三 | 数据治理与分析 + 模型微调 |
 
 ---
 
 ## 当前状态
 
-仓库初始化，处于**设计评审阶段**：总体架构与数据库设计已完成评审稿 v1.0，后端 / 前端工程尚未搭建。
+仓库初始化，处于**设计评审阶段**：
+- ✅ 总体架构与数据库设计已完成评审稿 v1.0
+- ✅ AI 能力集成架构设计完成
+- ✅ 后端工程骨架已搭建
+- 🚧 AI 服务工程待搭建
+- 🚧 前端工程待搭建
