@@ -1,11 +1,12 @@
+SET NAMES utf8mb4;
 -- ====================================
 -- 初始化数据脚本
 -- ====================================
 
--- 插入默认管理员账号（密码：admin123）
+-- seed accounts: admin/admin123, hr001/hr123456 (BCrypt)
 INSERT INTO sys_user (id, username, password, real_name, role, status) VALUES
-(1, 'admin', '$2a$10$N.ZM8lKwXJqwJ8K9ZYfN4.K8FXxKqJXF9wXM8xLxQZJOXGxQwXq0S', '系统管理员', 'ADMIN', 'active'),
-(2, 'hr001', '$2a$10$N.ZM8lKwXJqwJ8K9ZYfN4.K8FXxKqJXF9wXM8xLxQZJOXGxQwXq0S', 'HR张三', 'HR', 'active');
+(1, 'admin', '$2a$10$fXCKeAyxtbw/P2qlvMzrvO3EZtSDRbXVCxu7nwCv03nYLk7Wvgupy', '系统管理员', 'ADMIN', 'active'),
+(2, 'hr001', '$2a$10$wAF4a73ZFo33vCwhPYZH9uZ/q1qPMVncJ1xSek1jdBgHaW5TMJAJm', 'HR张三', 'HR', 'active');
 
 -- 插入枚举值字典
 INSERT INTO sys_dict (type, code, label, sort_order, status) VALUES
