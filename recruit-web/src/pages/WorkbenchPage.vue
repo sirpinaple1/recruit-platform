@@ -45,6 +45,12 @@ function onLogout(): void {
     <div class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
       <h1 class="text-xl font-semibold text-gray-900">Tritree 招聘工作台</h1>
       <p class="mt-2 text-sm text-gray-500">工作台建设中，业务模块将按任务分解逐步落地</p>
+      <router-link
+        to="/hr-requests"
+        class="mt-6 inline-flex h-9 items-center justify-center rounded-lg bg-[#2D5BE3] px-4 text-sm font-medium text-white transition hover:brightness-110"
+      >
+        进入需求单管理
+      </router-link>
 
       <div v-if="loading" class="mt-8 text-sm text-gray-400">正在校验登录态…</div>
       <div v-else-if="errorMsg" class="mt-8 text-sm text-red-600">{{ errorMsg }}</div>

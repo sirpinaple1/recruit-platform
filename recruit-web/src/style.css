@@ -1,1 +1,35 @@
 @import 'tailwindcss';
+
+/* 设计令牌：与 workbench 原型（Ardot《MVP 原型 v2》）逐值对齐 */
+@theme {
+  --color-primary: #2d5be3;
+  --color-primary-tint: #eef3fe;
+  --color-primary-line: #d6e0fb;
+
+  --color-success: #12a150;
+  --color-success-tint: #eaf6ef;
+  --color-warning: #d97706;
+  --color-warning-tint: #fef6e7;
+  --color-danger: #dc2626;
+  --color-danger-tint: #fef3f2;
+
+  --color-page: #f5f6f8;
+  --color-hover: #f1f3f7;
+  --color-line: #edf0f2;
+  --color-divider: #f1f2f4;
+
+  --color-t1: #14161a;
+  --color-t2: #374151;
+  --color-t3: #6b7280;
+  --color-t4: #98a2b3;
+
+  --font-sans: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    system-ui, -apple-system, sans-serif;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-t1);
+  background: var(--color-page);
+  -webkit-font-smoothing: antialiased;
+}

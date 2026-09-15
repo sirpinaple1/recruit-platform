@@ -16,6 +16,11 @@ const router = createRouter({
       component: () => import('@/pages/WorkbenchPage.vue'),
     },
     {
+      path: '/hr-requests',
+      name: 'hr-requests',
+      component: () => import('@/pages/hr-requests/HrRequestListPage.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/',
     },
