@@ -1,0 +1,244 @@
+/* ============================================================
+   登录页样式 —— 直搬设计稿原型《登录页 v3》
+   （设计稿还原页：此页豁免 Tailwind 规则，见 docs/design 与 AGENTS.md）
+   ============================================================ */
+
+/* Design Tokens —— 与 Ardot 设计稿《登录页 v3》严格对齐 */
+:root{
+  --primary:#2D5BE3;
+  --text:#101828;
+  --text-2:#667085;
+  --text-3:#98A2B3;
+  --text-4:#344054;
+  --border:#E4E7EC;
+  --line:#EAECF0;
+  --danger:#DC2626;
+  --success:#12A150;
+
+  /* 角色色板 —— 与参照稿 AnimatedCharacters 逐值一致 */
+  --char-purple:#6C3FF5;
+  --char-black:#2D2D2D;
+  --char-orange:#FF9B6B;
+  --char-yellow:#E8D754;
+
+  --radius-input:8px;
+  --radius-pill:24px;
+
+  --ease:cubic-bezier(.65,0,.35,1);
+  --ease-soft:cubic-bezier(.22,.61,.36,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+[hidden]{display:none !important;}
+html,body{height:100%;}
+body{
+  font-family:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  color:var(--text);
+  background:#fff;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;border:0;background:none;cursor:pointer;}
+
+/* ============================================================
+   壳层：左右二分屏（720 / 720）
+   ============================================================ */
+.login-app{display:flex;width:100%;height:100vh;overflow:hidden;background:#fff;}
+
+/* ---------- 左区 · 品牌插画 ---------- */
+.brand{
+  position:relative;flex:0 0 720px;width:720px;height:100%;
+  padding:48px;overflow:hidden;
+  display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;
+}
+/* 双层渐变做角色切换时的交叉淡入（CSS 渐变无法直接 transition） */
+.brand__bg{position:absolute;inset:0;z-index:0;transition:opacity .55s var(--ease-soft);}
+/* 20px 白色网格 —— 照搬参照稿 bg-grid-white/[0.05] + bg-[size:20px_20px] */
+.brand::before{
+  content:'';position:absolute;inset:0;z-index:1;pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+  background-size:20px 20px;
+}
+.brand__bg--candidate{background:linear-gradient(135deg,#4E5C80 0%,#64719A 50%,#7E8AA8 100%);opacity:1;}
+.brand__bg--employee {background:linear-gradient(135deg,#354271 0%,#465A8A 50%,#5F6FA8 100%);opacity:0;}
+.brand.is-employee .brand__bg--candidate{opacity:0;}
+.brand.is-employee .brand__bg--employee {opacity:1;}
+
+.brand__glow{position:absolute;z-index:1;border-radius:50%;pointer-events:none;}
+.glow-a{left:284px;top:200px;width:256px;height:256px;
+  background:radial-gradient(circle,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 70%);}
+.glow-b{left:160px;top:300px;width:384px;height:384px;
+  background:radial-gradient(circle,rgba(255,255,255,.13) 0%,rgba(255,255,255,0) 70%);}
+
+.brand__logo{position:relative;z-index:2;display:flex;align-items:center;gap:10px;}
+.brand__logobox{width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.16);
+  display:flex;align-items:center;justify-content:center;}
+.brand__wordmark{font-size:18px;font-weight:600;color:#fff;transition:opacity .3s var(--ease-soft);}
+
+/* 角色舞台：450×400，底部对齐在 500 高的容器里 */
+.brand__stagewrap{position:relative;z-index:2;width:100%;height:500px;
+  display:flex;align-items:flex-end;justify-content:center;}
+
+/* ---- 几何角色 · 过渡参数严格照搬 CareerCompass《AnimatedCharacters》----
+   角色与眼白 700ms ease-in-out；橙/黄瞳孔组与嘴 200ms ease-out；
+   瞳孔自身 100ms ease-out；眼白开合 150ms。
+   基准位置走 left/top（只在姿态切换时变一次），鼠标跟随走 transform（可走合成层）。 */
+.stage{position:relative;width:450px;height:400px;}
+
+.char{position:absolute;bottom:0;transform-origin:bottom center;
+  transition:transform .7s ease-in-out,height .7s ease-in-out;}
+.char--purple{left:70px; width:180px;height:400px;border-radius:10px 10px 0 0;background:var(--char-purple);z-index:1;}
+.char--black {left:240px;width:120px;height:310px;border-radius:8px 8px 0 0;  background:var(--char-black); z-index:2;}
+.char--orange{left:0;   width:240px;height:200px;border-radius:120px 120px 0 0;background:var(--char-orange);z-index:3;}
+.char--yellow{left:310px;width:140px;height:230px;border-radius:70px 70px 0 0;background:var(--char-yellow);z-index:4;}
+
+/* 容器固定高度 + 垂直居中：闭眼时眼睛收缩，闭合线仍留在原位，不会向上一跳 */
+.char__eyes{position:absolute;display:flex;align-items:center;
+  transition:transform .7s ease-in-out,left .7s ease-in-out,top .7s ease-in-out;}
+.char--purple .char__eyes{left:45px;top:40px;height:18px;gap:32px;}
+.char--black  .char__eyes{left:26px;top:32px;height:16px;gap:24px;}
+.char--orange .char__eyes{left:82px;top:90px;height:12px;gap:32px;
+  transition:transform .2s ease-out,left .2s ease-out,top .2s ease-out;}
+.char--yellow .char__eyes{left:52px;top:40px;height:12px;gap:24px;
+  transition:transform .2s ease-out,left .2s ease-out,top .2s ease-out;}
+
+.eye{width:18px;height:18px;border-radius:9px;background:#fff;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  transition:height .15s ease-in-out;}
+.char--black .eye{width:16px;height:16px;border-radius:8px;}
+.eye i{display:block;width:7px;height:7px;border-radius:3.5px;background:var(--char-black);
+  transition:transform .1s ease-out,opacity .15s ease-out;}
+.char--black .eye i{width:6px;height:6px;border-radius:3px;}
+/* 眨眼：眼白压到 2px，瞳孔随裁剪消失（照搬参照稿 isBlinking → height:2px） */
+.eye.is-blinking{height:2px;}
+.eye.is-blinking i{opacity:0;}
+
+/* 隐藏态（密码已输入且处于遮蔽态）：角色扭头背过密码框 + 闭上双眼 */
+.stage.is-hiding .eye{height:2px;}
+.stage.is-hiding .eye i{opacity:0;}
+
+/* 橙 / 黄只有瞳孔，闭眼 = 圆点收成一道横线 */
+.stage.is-hiding .dot{width:17px;height:3px;border-radius:1.5px;}
+
+/* 橙 / 黄只有瞳孔，没有眼白 */
+.dot{display:block;width:12px;height:12px;border-radius:6px;background:var(--char-black);
+  transition:transform .1s ease-out,width .16s ease-in-out,height .16s ease-in-out,border-radius .16s ease-in-out;}
+.char--yellow .char__mouth{position:absolute;left:40px;top:88px;width:80px;height:4px;border-radius:2px;
+  background:var(--char-black);
+  transition:transform .2s ease-out,left .2s ease-out,top .2s ease-out;}
+
+.brand__legal{position:relative;z-index:2;display:flex;gap:32px;}
+.brand__legal a{font-size:13px;color:rgba(255,255,255,.75);text-decoration:none;transition:color .2s;}
+.brand__legal a:hover{color:#fff;}
+
+/* ---------- 右区 · 登录表单 ---------- */
+.panel{flex:1 1 auto;height:100%;display:flex;flex-direction:column;background:#fff;min-width:0;}
+
+.panel__top{display:flex;align-items:center;justify-content:space-between;
+  height:64px;padding:0 32px;flex:0 0 auto;}
+.panel__domain{font-size:12px;color:var(--text-3);}
+.panel__switch{font-size:12px;font-weight:500;color:var(--primary);padding:4px 0;transition:opacity .2s;}
+.panel__switch:hover{opacity:.72;}
+
+.panel__center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:0 24px;}
+
+.form{width:420px;display:flex;flex-direction:column;gap:40px;
+  transition:opacity .18s var(--ease-soft);}
+.form.is-switching{opacity:0;}
+
+.form__head{display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center;}
+.form__title{font-size:30px;font-weight:700;letter-spacing:-.4px;}
+.form__sub{font-size:14px;color:var(--text-2);line-height:1.6;}
+
+.form__body{display:flex;flex-direction:column;gap:20px;}
+
+.field{display:flex;flex-direction:column;gap:8px;}
+.field__label{font-size:14px;font-weight:500;color:var(--text-4);}
+
+.input{display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;
+  border:1px solid var(--border);border-radius:var(--radius-input);background:#fff;
+  transition:border-color .2s var(--ease-soft),box-shadow .2s var(--ease-soft);}
+.input:focus-within{border-color:var(--primary);}
+.input.is-error{border-color:var(--danger);}
+.input__prefix{font-size:14px;font-weight:500;color:var(--text);flex:0 0 auto;}
+.input__divider{width:1px;height:18px;background:var(--line);flex:0 0 auto;}
+.input input{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;
+  font-family:inherit;font-size:14px;color:var(--text);}
+.input input::placeholder{color:var(--text-3);}
+.input__eye{display:flex;align-items:center;justify-content:center;width:20px;height:20px;
+  flex:0 0 auto;opacity:.9;transition:opacity .2s;}
+.input__eye:hover{opacity:.6;}
+
+.form__row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.check{display:flex;align-items:center;gap:8px;cursor:pointer;}
+.check input{position:absolute;opacity:0;width:0;height:0;}
+.check__box{position:relative;width:16px;height:16px;border:1px solid var(--border);border-radius:4px;
+  background:#fff;transition:background .2s,border-color .2s;}
+.check__box svg{position:absolute;inset:0;margin:auto;opacity:0;transform:scale(.6);
+  transition:opacity .18s,transform .18s;}
+.check input:checked + .check__box{background:var(--primary);border-color:var(--primary);}
+.check input:checked + .check__box svg{opacity:1;transform:scale(1);}
+.check__text{font-size:13px;color:var(--text-2);}
+.link{font-size:13px;font-weight:500;color:var(--primary);text-decoration:none;transition:opacity .2s;}
+.link:hover{opacity:.72;}
+
+/* 错误 / 成功提示条 */
+.alert{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;
+  font-size:12px;line-height:1.5;
+  animation:alertIn .22s var(--ease-soft);}
+.alert--error{background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);color:var(--danger);}
+.alert--ok{background:rgba(18,161,80,.1);border:1px solid rgba(18,161,80,.3);color:var(--success);}
+@keyframes alertIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+
+/* ---------- 主行动按钮 · InteractiveHoverButton（胶囊） ---------- */
+.pill{position:relative;display:flex;align-items:center;justify-content:center;
+  width:100%;height:48px;padding:0 24px;border:1px solid var(--border);
+  border-radius:var(--radius-pill);background:#fff;overflow:hidden;}
+.pill__bg{position:absolute;inset:0;background:var(--primary);
+  transform:scaleX(0);transform-origin:left center;
+  transition:transform .38s var(--ease),opacity .3s;}
+.pill__text{position:relative;z-index:1;display:flex;align-items:center;gap:8px;
+  font-size:16px;font-weight:600;color:var(--text);
+  transition:transform .38s var(--ease),opacity .26s var(--ease);}
+.pill__text--hover{position:absolute;inset:0;justify-content:center;color:#fff;
+  transform:translateX(-72px);opacity:0;pointer-events:none;}
+.pill:hover .pill__bg{transform:scaleX(1);}
+.pill:hover .pill__text--rest{transform:translateX(72px);opacity:0;}
+.pill:hover .pill__text--hover{transform:translateX(0);opacity:1;}
+.pill:active{transform:scale(.995);}
+
+.pill__loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+  gap:8px;font-size:16px;font-weight:600;color:#fff;z-index:2;}
+.pill.is-loading{cursor:default;}
+.pill.is-loading .pill__bg{transform:scaleX(1);opacity:.45;transition:transform .38s var(--ease),opacity .3s;}
+.pill.is-loading .pill__text{opacity:0;}
+.pill.is-loading .pill__loading{display:flex;}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;
+  border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+.pill.is-done .pill__bg{transform:scaleX(1);opacity:1;}
+.pill.is-done .pill__text--rest{transform:translateX(72px);opacity:0;}
+
+/* ---------- 社交 + 页脚 ---------- */
+.form__foot{display:flex;flex-direction:column;gap:16px;}
+.social{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;height:48px;padding:0 24px;border:1px solid var(--border);
+  border-radius:var(--radius-pill);background:#fff;
+  font-size:14px;font-weight:500;color:var(--text-4);
+  transition:border-color .25s,background .25s,color .25s;}
+.social:hover{border-color:var(--primary);background:#F7F9FF;color:var(--primary);}
+.social svg{flex:0 0 auto;}
+.icon--qr{display:none;}
+.login-app.is-employee .icon--qr{display:block;}
+.login-app.is-employee .icon--wechat{display:none;}
+
+.form__signup{display:flex;align-items:center;justify-content:center;gap:4px;padding-top:8px;
+  font-size:13px;color:var(--text-2);}
+.form__signup a{font-size:13px;font-weight:500;color:var(--primary);text-decoration:none;transition:opacity .2s;}
+.form__signup a:hover{opacity:.72;}
+
+/* ---------- 响应式：lg 断点以下收起插画 ---------- */
+@media (max-width:1023px){
+  .brand{display:none;}
+  .panel__center{padding:0 20px;}
+}

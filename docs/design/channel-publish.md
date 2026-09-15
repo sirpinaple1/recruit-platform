@@ -245,17 +245,22 @@ extension/
 
 ## 9. 实施拆解与验收
 
-| 单元 | 内容 | 验证 |
-|---|---|---|
-| T2.1 | `hr_request` 建表 SQL + CRUD | curl 建单/查单 |
-| T2.2 | 状态机（转移表+非法转移 4xx） | 非法转移被拒，合法转移落库 |
-| T3.1 | `channel` 表 + CRUD | 纯数据插 mock_demo 渠道，不改代码 |
-| T3.2 | `publish_draft` 渲染（白名单+深链实例化） | approve 后每启用渠道各一条草稿，内容正确 |
-| T3.3 | `extension_token` + `publish_record` + 回填 API | 拉草稿→回填→台账可查；吊销后 401 |
-| T4.1 | MV3 骨架 + options | chrome://extensions 加载，配置持久 |
-| T4.2 | fixtures/publish-mock.html | 15+ 字段结构完整（input/select/radio/textarea） |
-| T4.3 | 填充引擎三级匹配 | mock 页 15+ 字段全命中 |
-| T4.4 | popup 全链路 | 草稿→填充→回填→台账闭环 |
+**前置任务（本模块开工依赖）——均已完成**：
+- ✅ T0 开发环境（Docker：MySQL 3307 / Redis 6380 等五件套 + Ollama 模型；初始化 schema/种子数据）
+- ✅ T1 后端基础（统一响应 R / 全局异常 / 健康检查 / 登录 + JWT 会话：`POST /api/auth/login`、`GET /api/auth/me`，BCrypt + Bearer 拦截器）
+- ✅ T1.4 前端登录接通（recruit-web：Vite + Vue3 + TS 脚手架、httpClient/Zod/路由守卫、登录页原型还原、工作台占位页）
+
+| 单元 | 内容 | 验证 | 状态 |
+|---|---|---|---|
+| T2.1 | `hr_request` 建表 SQL + CRUD | curl 建单/查单 | 待开发 |
+| T2.2 | 状态机（转移表+非法转移 4xx） | 非法转移被拒，合法转移落库 | 待开发 |
+| T3.1 | `channel` 表 + CRUD | 纯数据插 mock_demo 渠道，不改代码 | 待开发 |
+| T3.2 | `publish_draft` 渲染（白名单+深链实例化） | approve 后每启用渠道各一条草稿，内容正确 | 待开发 |
+| T3.3 | `extension_token` + `publish_record` + 回填 API | 拉草稿→回填→台账可查；吊销后 401 | 待开发 |
+| T4.1 | MV3 骨架 + options | chrome://extensions 加载，配置持久 | 待开发 |
+| T4.2 | fixtures/publish-mock.html | 15+ 字段结构完整（input/select/radio/textarea） | 待开发 |
+| T4.3 | 填充引擎三级匹配 | mock 页 15+ 字段全命中 | 待开发 |
+| T4.4 | popup 全链路 | 草稿→填充→回填→台账闭环 | 待开发 |
 
 **MVP 验收脚本**：
 

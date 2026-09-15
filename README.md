@@ -96,7 +96,7 @@
 recruit-platform/
 ├── recruit-server/      # Spring Boot 后端（Java 17 / Maven）；内有 AGENTS.md
 ├── recruit-ai-service/  # FastAPI AI 服务（Python 3.11）；内有 AGENTS.md
-├── recruit-web/         # Vue 3 前端（Vite + TypeScript，待建）；内有 AGENTS.md
+├── recruit-web/         # Vue 3 前端（Vite + TypeScript + Tailwind v4）；内有 AGENTS.md
 ├── docs/                # 设计文档：架构设计、数据库设计、AI 集成方案
 ├── research/            # 调研资料：渠道 API、钉钉 AI 面试
 ├── .agent/skills/       # AI 协作技能（SKILL.md）
@@ -136,11 +136,32 @@ recruit-platform/
 
 ---
 
+## 本地运行
+
+```bash
+# 1) 基础设施（MySQL 3307 / Redis 6380 / RabbitMQ / MinIO）
+docker-compose up -d
+
+# 2) 后端（端口 6017，dev profile 连本地容器）
+cd recruit-server && mvn spring-boot:run
+
+# 3) 前端（端口 5173，/api 经 Vite proxy 转发到 6017）
+cd recruit-web && npm install && npm run dev
+```
+
+种子账号：`admin/admin123`（管理员）、`hr001/hr123456`（HR）。
+
+---
+
 ## 当前状态
 
-仓库初始化，处于**设计评审阶段**：
+阶段一 MVP 开发中（渠道发布模块，见 `docs/design/channel-publish.md`）：
 - ✅ 总体架构与数据库设计已完成评审稿 v1.0
 - ✅ AI 能力集成架构设计完成
-- ✅ 后端工程骨架已搭建
+- ✅ T0 开发环境就绪（Docker 五件套 + Ollama 模型 + 初始化数据）
+- ✅ T1 后端基础：统一响应/全局异常/健康检查、登录与 JWT 会话（BCrypt + 拦截器）
+- ✅ T1.4 前端工程已搭建并接通登录：httpClient（Zod 校验 + Bearer 注入）、路由守卫、登录页（原型完整还原，双角色）、工作台占位页
+- 🚧 T2.x 需求单（hr_request）CRUD 与状态机：待开发
+- 🚧 T3.x 渠道/草稿/台账/扩展授权：待开发
+- 🚧 T4.x Chrome 扩展（MV3 填充引擎）：待开发
 - 🚧 AI 服务工程待搭建
-- 🚧 前端工程待搭建
