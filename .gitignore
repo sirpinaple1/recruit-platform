@@ -86,3 +86,6 @@ logs/
 Thumbs.db
 ehthumbs.db
 desktop.ini
+
+# ---------- AI 协作本地记忆 ----------
+.workbuddy/
