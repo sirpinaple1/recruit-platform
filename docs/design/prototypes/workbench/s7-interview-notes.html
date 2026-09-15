@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tritree 招聘中台 · 面试纪要 / 杨帆 · 二面</title>
+<style>
+/* ============================================================
+   招聘中台 · 工作台设计令牌（与 Ardot《MVP 原型 v2》逐值对齐）
+   ============================================================ */
+:root{
+  --primary:#2D5BE3;  --primary-tint:#EEF3FE;  --primary-line:#D6E0FB;
+  --ai:#7C4DFF;       --ai-tint:#F3EEFF;       --ai-tint-2:#F7F5FF;  --ai-line:#E1D5FF;
+  --success:#12A150;  --success-tint:#EAF6EF;
+  --warning:#D97706;  --warning-tint:#FEF6E7;
+  --danger:#DC2626;   --danger-tint:#FEF3F2;
+
+  --bg:#F5F6F8;  --card:#FFFFFF;  --sidebar:#FCFCFD;  --hover:#F1F3F7;
+  --border:#EDF0F2; --divider:#F1F2F4; --track:#EDEFF2;
+
+  --t1:#14161A; --t2:#374151; --t3:#6B7280; --t4:#98A2B3;
+
+  --r-card:8px; --r-btn:6px; --r-chip:4px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{
+  font-family:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  color:var(--t1);background:var(--bg);min-width:1180px;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit;text-decoration:none;}
+button{font-family:inherit;border:0;background:none;cursor:pointer;}
+svg{display:block;}
+.app{display:flex;height:100vh;overflow:hidden;}
+
+/* ===================== 侧栏 ===================== */
+.sidebar{
+  flex:0 0 240px;width:240px;background:var(--sidebar);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;padding:16px 12px 14px;
+}
+.sb__logo{display:flex;align-items:center;gap:10px;padding:4px 8px 20px;}
+.sb__mark{width:28px;height:28px;border-radius:8px;background:var(--primary);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.sb__name{font-size:15px;font-weight:600;letter-spacing:.2px;}
+.sb__nav{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;}
+.nav{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;
+  border-radius:8px;font-size:13px;color:var(--t2);
+  transition:background .15s ease,color .15s ease;}
+.nav:hover{background:var(--hover);}
+.nav.is-active{background:var(--primary-tint);color:var(--primary);font-weight:500;}
+.nav svg{flex:0 0 auto;}
+.sb__user{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;}
+.sb__user:hover{background:var(--hover);}
+.sb__uname{font-size:12.5px;font-weight:500;line-height:1.35;}
+.sb__urole{font-size:11px;color:var(--t4);line-height:1.35;}
+
+/* ===================== 顶栏 ===================== */
+.main{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;height:100vh;}
+.topbar{
+  flex:0 0 62px;height:62px;background:#fff;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 24px;
+}
+.tb__left{display:flex;align-items:baseline;gap:10px;min-width:0;}
+.tb__title{font-size:15px;font-weight:600;white-space:nowrap;}
+.tb__crumb{font-size:15px;font-weight:400;color:var(--t3);}
+.tb__sep{font-size:15px;color:var(--t4);}
+.tb__date{font-size:12px;color:var(--t4);white-space:nowrap;}
+.tb__right{display:flex;align-items:center;gap:12px;}
+.tb__search{width:236px;height:34px;border-radius:8px;background:var(--bg);
+  display:flex;align-items:center;gap:8px;padding:0 10px;
+  font-size:12.5px;color:var(--t4);}
+.tb__search .kbd{margin-left:auto;font-size:10px;color:var(--t4);
+  border:1px solid var(--border);border-radius:4px;padding:0 4px;background:#fff;line-height:15px;}
+.btn-ai{display:flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;
+  background:var(--ai-tint);border:1px solid var(--ai-line);color:#6A3FE0;
+  font-size:12.5px;font-weight:500;transition:background .18s;}
+.btn-ai:hover{background:#EDE4FF;}
+.icon-btn{position:relative;width:34px;height:34px;border:1px solid var(--border);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;color:var(--t3);background:#fff;
+  transition:border-color .18s,color .18s;}
+.icon-btn:hover{border-color:#D6DAE0;color:var(--t2);}
+.icon-btn__dot{position:absolute;top:7px;right:8px;width:6px;height:6px;border-radius:50%;
+  background:var(--danger);border:1.5px solid #fff;}
+
+/* ===================== 内容区 ===================== */
+.body{flex:1 1 auto;overflow:auto;background:var(--bg);padding:24px;position:relative;}
+.page{display:flex;flex-direction:column;gap:20px;}
+
+.avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#D9DDE5,#EEF0F4);
+  display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--t3);flex:0 0 auto;}
+.avatar--sm{width:22px;height:22px;font-size:10px;}
+
+/* 卡片 */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);}
+.card__hd{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:14px 20px;border-bottom:1px solid var(--divider);}
+.card__hd--plain{border-bottom:0;}
+.card__title{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px;}
+.card__sub{font-size:11.5px;color:var(--t4);}
+.card__bd{padding:16px 20px;}
+.card__bd--flush{padding:0 20px;}
+
+/* 统计卡 */
+.grid-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.grid-stats--3{grid-template-columns:repeat(3,1fr);}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);
+  padding:16px 20px 18px;}
+.stat__k{font-size:12px;color:var(--t3);}
+.stat__v{font-size:28px;font-weight:700;letter-spacing:-.4px;margin-top:6px;line-height:1.15;}
+.stat__v--danger{color:var(--danger);}
+
+/* 两栏 */
+.cols{display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start;}
+.cols--320{grid-template-columns:320px 1fr;}
+.stack{display:flex;flex-direction:column;gap:20px;}
+
+/* chip / 徽标 */
+.chip{display:inline-flex;align-items:center;gap:4px;height:21px;padding:0 8px;
+  border-radius:var(--r-chip);font-size:11.5px;font-weight:500;white-space:nowrap;}
+.chip--primary{background:var(--primary-tint);color:var(--primary);}
+.chip--success{background:var(--success-tint);color:var(--success);}
+.chip--warning{background:var(--warning-tint);color:var(--warning);}
+.chip--danger{background:var(--danger-tint);color:var(--danger);}
+.chip--neutral{background:#F3F4F6;color:var(--t2);font-weight:400;}
+.chip--ai{background:var(--ai-tint);color:var(--ai);}
+.chip--progress{background:var(--primary-tint);color:var(--primary);font-weight:400;}
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;
+  padding:0 5px;border-radius:9px;background:#F3F4F6;color:var(--t3);font-size:11px;font-weight:500;}
+
+/* 按钮 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:34px;padding:0 14px;border-radius:var(--r-btn);font-size:12.5px;font-weight:500;
+  transition:background .18s,border-color .18s,color .18s;white-space:nowrap;}
+.btn--primary{background:var(--primary);color:#fff;}
+.btn--primary:hover{background:#2450CE;}
+.btn--default{background:#fff;border:1px solid var(--border);color:var(--t2);}
+.btn--default:hover{border-color:#D6DAE0;background:#FAFBFC;}
+.btn--block{width:100%;}
+.btn--lg{height:38px;font-size:13px;}
+.link{font-size:12.5px;color:var(--primary);font-weight:500;transition:opacity .18s;}
+.link:hover{opacity:.72;}
+.link--quiet{font-size:12.5px;color:var(--t3);}
+.link--quiet:hover{color:var(--t2);}
+
+/* 表单 */
+.field{display:flex;flex-direction:column;gap:8px;}
+.field__label{font-size:12.5px;font-weight:500;color:var(--t2);}
+.input,.select,.textarea{
+  width:100%;height:38px;border:1px solid var(--border);border-radius:var(--r-btn);
+  padding:0 12px;font-family:inherit;font-size:13px;color:var(--t1);background:#fff;
+  transition:border-color .18s;outline:0;
+}
+.input::placeholder,.textarea::placeholder{color:var(--t4);}
+.input:focus,.select:focus,.textarea:focus{border-color:var(--primary);}
+.textarea{height:96px;padding:10px 12px;resize:none;line-height:1.65;}
+.select{appearance:none;background-image:url("data:image/svg+xml;charset=utf8,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' stroke='%2398A2B3' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;}
+.seg{display:flex;padding:3px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-btn);}
+.seg__i{flex:1;height:30px;display:flex;align-items:center;justify-content:center;
+  border-radius:4px;font-size:12.5px;color:var(--t3);transition:background .18s,color .18s,box-shadow .18s;}
+.seg__i.is-on{background:#fff;color:var(--t1);font-weight:500;box-shadow:0 1px 2px rgba(16,24,40,.06);}
+.seg--bare{background:transparent;border:0;padding:0;gap:4px;}
+.seg--bare .seg__i{flex:0 0 auto;height:34px;padding:0 16px;border:1px solid transparent;}
+.seg--bare .seg__i.is-on{border-color:var(--border);box-shadow:0 1px 2px rgba(16,24,40,.05);}
+
+/* 提示条 */
+.note{display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border-radius:var(--r-btn);
+  font-size:12px;line-height:1.6;}
+.note--ai{background:var(--ai-tint-2);color:#5B3FD1;}
+.note--info{background:#F0F6FF;color:var(--primary);}
+.note--ai .note__t{font-weight:600;color:var(--ai);}
+.note__icon{flex:0 0 auto;margin-top:2px;}
+
+/* 列表行 / 表格 */
+.rows{display:flex;flex-direction:column;}
+.row{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:13px 20px;border-bottom:1px solid var(--divider);}
+.row:last-child{border-bottom:0;}
+.row__t{font-size:13px;color:var(--t1);line-height:1.5;}
+.row__s{font-size:11.5px;color:var(--t4);line-height:1.5;margin-top:2px;}
+.row__s--danger{color:var(--danger);}
+.row__s--warning{color:var(--warning);}
+
+.group-hd{padding:8px 20px;font-size:11.5px;font-weight:500;color:var(--t3);background:#FAFBFC;}
+.group-hd--warning{background:var(--warning-tint);color:var(--warning);}
+
+.table{background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);overflow:hidden;}
+.thead,.trow{display:grid;align-items:center;gap:20px;padding:0 20px;}
+.thead{height:40px;background:#FAFBFC;border-bottom:1px solid var(--divider);
+  font-size:11.5px;font-weight:500;color:var(--t3);}
+.trow{min-height:64px;border-bottom:1px solid var(--divider);font-size:13px;color:var(--t2);
+  transition:background .15s;}
+.trow:last-child{border-bottom:0;}
+.trow:hover{background:#FAFBFC;}
+.trow__t{font-size:13px;font-weight:600;color:var(--t1);line-height:1.45;}
+.trow__s{font-size:11.5px;color:var(--t4);line-height:1.45;margin-top:1px;}
+.prog-num{font-size:13px;font-weight:600;color:var(--t1);}
+.prog-num i{font-style:normal;font-weight:400;color:var(--t4);}
+
+.tfoot{display:flex;align-items:center;justify-content:space-between;height:52px;
+  padding:0 20px;border-top:1px solid var(--divider);}
+.tfoot__n{font-size:12px;color:var(--t3);}
+.pager{display:flex;align-items:center;gap:6px;}
+.pager__i{min-width:26px;height:26px;border-radius:6px;display:flex;align-items:center;
+  justify-content:center;font-size:12.5px;color:var(--t3);}
+.pager__i:hover{background:var(--hover);}
+.pager__i.is-on{background:var(--primary);color:#fff;font-weight:500;}
+
+/* 进度条 */
+.progress{height:6px;border-radius:3px;background:var(--track);overflow:hidden;}
+.progress__i{height:100%;border-radius:3px;background:var(--primary);}
+.progress__i--success{background:var(--success);}
+.progress-row{display:flex;align-items:center;gap:12px;}
+.progress-row__t{width:78px;font-size:12.5px;color:var(--t2);flex:0 0 auto;}
+.progress-row .progress{flex:1 1 auto;}
+.progress-row__v{width:40px;text-align:right;font-size:12px;color:var(--t2);flex:0 0 auto;}
+.progress-row__v b{font-weight:600;color:var(--t1);}
+
+/* 时间线 */
+.timeline{display:flex;flex-direction:column;}
+.tl{position:relative;padding:0 0 18px 20px;}
+.tl:last-child{padding-bottom:0;}
+.tl::before{content:'';position:absolute;left:3.5px;top:12px;bottom:-2px;width:1px;background:var(--divider);}
+.tl:last-child::before{display:none;}
+.tl__dot{position:absolute;left:0;top:5px;width:8px;height:8px;border-radius:50%;
+  background:var(--primary);box-shadow:0 0 0 3px var(--primary-tint);}
+.tl__dot--warning{background:var(--warning);box-shadow:0 0 0 3px var(--warning-tint);}
+.tl__dot--idle{background:#D0D5DD;box-shadow:0 0 0 3px #F2F4F7;}
+.tl__t{font-size:12.5px;font-weight:500;color:var(--t1);line-height:1.5;}
+.tl__s{font-size:11.5px;color:var(--t4);line-height:1.5;margin-top:2px;}
+.tl__s--warning{color:var(--warning);}
+
+/* 键值行 */
+.kv{display:flex;align-items:flex-start;gap:12px;font-size:12.5px;line-height:1.6;}
+.kv__k{width:74px;flex:0 0 auto;color:var(--t3);}
+.kv__v{flex:1 1 auto;color:var(--t2);}
+.kv__v b{font-weight:600;color:var(--t1);}
+.kv--wide .kv__k{width:88px;}
+.kv-list{display:flex;flex-direction:column;gap:10px;}
+.kv-grid{display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:12px 56px;}
+.kv-grid .kv{display:flex;gap:10px;font-size:12.5px;line-height:1.6;}
+.kv-grid .kv__k{width:auto;flex:0 0 auto;}
+.kv-grid .kv__v{flex:0 0 auto;}
+
+/* 标题小节 */
+.sec{padding:16px 20px;border-bottom:1px solid var(--divider);}
+.sec:last-child{border-bottom:0;}
+.sec__hd{font-size:13px;font-weight:600;margin-bottom:10px;}
+.sec__p{font-size:12.5px;color:var(--t2);line-height:1.75;}
+.sec__list{display:flex;flex-direction:column;gap:8px;margin-top:2px;}
+.sec__li{position:relative;padding-left:14px;font-size:12.5px;color:var(--t2);line-height:1.7;}
+.sec__li::before{content:'';position:absolute;left:2px;top:8px;width:4px;height:4px;
+  border-radius:50%;background:#C6CBD4;}
+.sec__li--warning{color:var(--warning);}
+.sec__li--warning::before{background:var(--warning);}
+
+/* 招聘流水线 */
+.board{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+.bcol{background:#F1F2F4;border-radius:var(--r-card);padding:10px;min-height:520px;}
+.bcol--success{background:var(--success-tint);}
+.bcol__hd{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 10px;}
+.bcol__t{font-size:12.5px;font-weight:600;}
+.bcol--success .bcol__t{color:var(--success);}
+.bcol__n{font-size:12px;color:var(--t4);}
+.bcol__list{display:flex;flex-direction:column;gap:8px;}
+.pcard{background:#fff;border:1px solid var(--border);border-radius:6px;padding:10px 12px;
+  transition:border-color .18s,box-shadow .18s;cursor:pointer;}
+.pcard:hover{border-color:var(--primary-line);box-shadow:0 2px 8px rgba(16,24,40,.06);}
+.pcard__t{font-size:12.5px;font-weight:600;line-height:1.5;}
+.pcard__s{font-size:11px;color:var(--t4);line-height:1.5;margin-top:3px;}
+.pcard__s--warning{color:var(--warning);}
+.pcard__s--success{color:var(--success);}
+
+/* 抽屉 / 弹窗 */
+.overlay{position:absolute;inset:0;background:rgba(2,6,12,.4);z-index:20;
+  animation:fadeIn .2s ease-out;}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+@keyframes slideIn{from{transform:translateX(24px);opacity:0;}to{transform:none;opacity:1;}}
+@keyframes popIn{from{transform:translateY(8px) scale(.99);opacity:0;}to{transform:none;opacity:1;}}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:580px;background:#fff;z-index:21;
+  display:flex;flex-direction:column;box-shadow:-18px 0 44px rgba(16,24,40,.16);
+  animation:slideIn .24s cubic-bezier(.22,.61,.36,1);}
+.drawer__hd{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+  padding:20px 40px 16px;}
+.drawer__title{font-size:15px;font-weight:600;}
+.drawer__bd{flex:1 1 auto;overflow:auto;padding:4px 40px 20px;
+  display:flex;flex-direction:column;gap:18px;}
+.drawer__ft{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:10px;
+  padding:16px 40px 20px;border-top:1px solid var(--divider);}
+.modal-wrap{position:absolute;inset:0;z-index:21;display:flex;align-items:center;justify-content:center;}
+.modal{width:600px;max-height:calc(100% - 32px);background:#fff;border-radius:10px;
+  display:flex;flex-direction:column;box-shadow:0 18px 44px rgba(16,24,40,.18);
+  animation:popIn .22s cubic-bezier(.22,.61,.36,1);}
+.modal__hd{display:flex;align-items:center;justify-content:space-between;padding:20px 28px 16px;}
+.modal__title{font-size:15px;font-weight:600;}
+.modal__bd{flex:1 1 auto;overflow:auto;padding:0 28px;display:flex;flex-direction:column;gap:18px;}
+.modal__ft{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:16px 28px 20px;border-top:1px solid var(--divider);}
+.cand-box{display:flex;align-items:center;gap:12px;background:var(--bg);border-radius:8px;
+  padding:12px 14px;}
+.cand-box__t{font-size:13px;font-weight:600;}
+.cand-box__s{font-size:11.5px;color:var(--t4);margin-top:2px;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+
+/* 漏斗 */
+.funnel{display:flex;flex-direction:column;align-items:center;gap:14px;padding:26px 0 6px;}
+.funnel__b{height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:12.5px;font-weight:500;}
+.funnel__b--success{background:var(--success);}
+
+/* 文档（录用通知书） */
+.doc{padding:40px 56px;}
+.doc__co{font-size:12px;color:var(--t3);text-align:center;}
+.doc__title{font-size:21px;font-weight:700;text-align:center;margin:10px 0 26px;letter-spacing:1px;}
+.doc__p{font-size:12.5px;color:var(--t2);line-height:1.9;}
+.doc__row{display:flex;align-items:center;background:#FAFBFC;border-radius:6px;
+  padding:12px 16px;margin:8px 0;font-size:12.5px;}
+.doc__row .doc__k{width:110px;flex:0 0 auto;color:var(--t3);}
+.doc__row .doc__v{color:var(--t1);font-weight:500;}
+.doc__sign{display:flex;justify-content:space-between;font-size:12.5px;color:var(--t2);margin-top:26px;}
+.doc__mt{margin-top:18px;}
+
+/* 空态 / 说明 */
+.empty-body{height:100%;}
+
+/* ---------- 工具条（列表页 / 数据页） ---------- */
+.toolbar{display:flex;align-items:center;gap:12px;}
+.toolbar__search{display:flex;align-items:center;gap:8px;width:240px;height:34px;
+  padding:0 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r-btn);
+  font-size:12.5px;color:var(--t4);}
+.toolbar__search svg{color:var(--t4);flex:0 0 auto;}
+.select--btn{width:auto;height:34px;padding:0 30px 0 12px;font-size:12.5px;color:var(--t2);
+  cursor:pointer;text-align:left;}
+
+/* ---------- 卡片标题大号 / 元信息行 ---------- */
+.card__title--xl{font-size:17px;letter-spacing:-.2px;}
+.card__ft{display:flex;align-items:center;justify-content:flex-end;gap:10px;
+  padding:14px 20px;border-top:1px solid var(--divider);}
+.meta-row{display:flex;align-items:center;gap:20px;font-size:12.5px;color:var(--t3);}
+.meta-row b{font-weight:600;color:var(--t2);}
+.match{font-size:12.5px;font-weight:600;color:var(--success);}
+.row-line{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  font-size:12.5px;color:var(--t2);}
+.row-line__side{font-size:12px;color:var(--t4);}
+.row-line__k{width:44px;flex:0 0 auto;font-size:12.5px;color:var(--t3);}
+.file-line{display:inline-flex;align-items:center;gap:7px;color:var(--t2);}
+.file-line svg{color:var(--t4);flex:0 0 auto;}
+
+/* ---------- 小组件 ---------- */
+.quick-links{display:flex;flex-direction:column;gap:12px;margin-top:16px;}
+.mini__hd{display:flex;align-items:center;justify-content:space-between;
+  font-size:12.5px;color:var(--t2);margin-bottom:8px;}
+.sched{display:flex;align-items:flex-start;gap:14px;}
+.sched__t{min-width:40px;font-size:12.5px;font-weight:600;color:var(--t1);line-height:1.5;}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;}
+.exp__t{font-size:12.5px;font-weight:500;color:var(--t1);line-height:1.6;}
+.exp__s{font-size:11.5px;color:var(--t4);line-height:1.6;margin-top:2px;}
+.score-list{display:flex;flex-direction:column;gap:12px;}
+.score{display:flex;align-items:center;justify-content:space-between;
+  font-size:12.5px;color:var(--t2);}
+.score__v{font-weight:600;color:var(--t1);}
+.rate{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--t2);}
+.rate__v{font-size:13px;font-weight:600;color:var(--t1);}
+.rate__v--success{color:var(--success);}
+.status-warning{color:var(--warning);font-weight:500;}
+.hint{font-size:11.5px;color:var(--t4);line-height:1.6;text-align:center;}
+.interviewer{display:flex;align-items:center;gap:9px;}
+.interviewer__n{font-size:12.5px;color:var(--t2);}
+.modal__hint{font-size:11.5px;color:var(--t4);}
+.modal__acts{display:flex;align-items:center;gap:10px;}
+.icon-btn--bare{width:28px;height:28px;border:0;border-radius:6px;color:var(--t3);}
+.icon-btn--bare:hover{background:var(--hover);color:var(--t2);}
+.note--ai b{color:var(--ai);}
+.body--drawer{overflow:hidden;}
+
+/* ---------- 表格列宽 ---------- */
+.thead,.trow{grid-template-columns:1fr 120px 110px 120px 130px 56px;}
+.trow__upd{color:var(--t3);}
+.doc__row .doc__k{width:130px;}
+
+@media (max-width:1279px){
+  .cols{grid-template-columns:1fr 300px;}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===================== 侧栏 ===================== -->
+  <aside class="sidebar">
+    <div class="sb__logo">
+      <div class="sb__mark">
+        <svg width="17" height="17" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15 3 L22 13 H18.5 L24 22 H6 L11.5 13 H8 L15 3 Z" fill="#FFFFFF"/>
+          <rect x="13" y="22" width="4" height="5" rx="1" fill="#FFFFFF" opacity="0.65"/>
+        </svg>
+      </div>
+      <span class="sb__name">招聘中台</span>
+    </div>
+
+    <nav class="sb__nav">
+      <a class="nav" href="s1-workbench.html"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none"><rect x="2" y="2" width="5" height="5" rx="1.4"/><rect x="9" y="2" width="5" height="5" rx="1.4"/><rect x="2" y="9" width="5" height="5" rx="1.4"/><rect x="9" y="9" width="5" height="5" rx="1.4"/></g></svg><span>工作台</span></a>
+      <a class="nav" href="s2-jobs.html"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"><rect x="2" y="5" width="12" height="9" rx="1.6"/><path d="M6 5V3.6A1.6 1.6 0 0 1 7.6 2h.8A1.6 1.6 0 0 1 10 3.6V5"/><path d="M2 8.6h12"/></g></svg><span>职位</span></a>
+      <a class="nav" href="s5-candidate.html"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"><circle cx="6.4" cy="5.8" r="2.4"/><path d="M2.2 13.4c0-2.2 1.9-3.6 4.2-3.6s4.2 1.4 4.2 3.6"/><path d="M10.6 4.1a2.4 2.4 0 0 1 0 4.4"/><path d="M12 10c1.2.5 1.8 1.7 1.8 3.4"/></g></svg><span>候选人</span></a>
+      <a class="nav is-active" href="s7-interview-notes.html"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"><rect x="2" y="3.5" width="12" height="10.5" rx="1.6"/><path d="M2 6.8h12"/><path d="M5.5 2v3M10.5 2v3"/></g></svg><span>面试</span></a>
+      <a class="nav" href="s9-analytics.html"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"><path d="M2 13.5h12"/><path d="M4.2 11.4V8.6"/><path d="M8 11.4V5.4"/><path d="M11.8 11.4V9.6"/></g></svg><span>数据</span></a>
+      <a class="nav" href="../login-prototype.html"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c1.6 1.8 2.5 3.9 2.5 6S9.6 12.2 8 14C6.4 12.2 5.5 10.1 5.5 8S6.4 3.8 8 2Z"/></g></svg><span>简历门户</span></a>
+    </nav>
+
+    <div class="sb__user">
+      <span class="avatar">潘</span>
+      <span>
+        <span class="sb__uname">潘雨松</span><br>
+        <span class="sb__urole">招聘负责人</span>
+      </span>
+    </div>
+  </aside>
+
+  <!-- ===================== 主区 ===================== -->
+  <main class="main">
+    <header class="topbar">
+      <div class="tb__left">
+        <span class="tb__crumb">面试纪要</span><span class="tb__sep">/</span><span class="tb__title">杨帆 · 二面</span>
+        <span class="tb__date">9月10日 星期四</span>
+      </div>
+      <div class="tb__right">
+        <div class="tb__search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"><circle cx="7.2" cy="7.2" r="4.4"/><path d="M10.6 10.6 13.6 13.6"/></g></svg>
+          <span>搜索职位、候选人</span>
+          <span class="kbd">HK</span>
+        </div>
+        <button class="btn-ai" type="button"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 1.4 8.35 5.65 12.6 7 8.35 8.35 7 12.6 5.65 8.35 1.4 7 5.65 5.65Z" fill="#7C4DFF"/><circle cx="11.6" cy="2.4" r="1.3" fill="#7C4DFF" opacity=".55"/></svg> AI 助手</button>
+        <button class="icon-btn" type="button" aria-label="通知"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><g stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"><path d="M8 2.2a3.9 3.9 0 0 1 3.9 3.9v2.3l1 2.1H3.1l1-2.1V6.1A3.9 3.9 0 0 1 8 2.2Z"/><path d="M6.5 12.5a1.5 1.5 0 0 0 3 0"/></g></svg><span class="icon-btn__dot"></span></button>
+        <span class="avatar">潘</span>
+      </div>
+    </header>
+
+    <div class="body ">
+
+<div class="page">
+  <div class="cols" style="align-items:stretch">
+    <div class="card">
+      <div class="card__hd">
+        <span class="card__title card__title--xl">二面纪要 · 杨帆
+          <span class="chip chip--ai">钉钉 AI 自动生成</span>
+        </span>
+        <a class="link" href="#">查看原始转写</a>
+      </div>
+
+      <div class="sec">
+        <div class="sec__hd">面试 AI 摘要</div>
+        <p class="sec__p">候选人在二面中详细描述了在阿里主导的高并发订单系统重构，说明了分库分表方案与灰度切流策略，并现场实现了一致性哈希。对稳定性与容灾有清晰认识，追问下能给出明确的取舍理由。</p>
+      </div>
+
+      <div class="sec">
+        <div class="sec__hd">关键要点</div>
+        <div class="sec__list">
+          <div class="sec__li">主导过日订单千万级系统的分库分表落地</div>
+          <div class="sec__li">熟悉 Go 高并发模型，对 GC 调优有实操经验</div>
+          <div class="sec__li">跨团队协作经验充分，沟通表达结构化</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec__hd">表现详情</div>
+        <div class="sec__list">
+          <div class="sec__li">现场手写一致性哈希实现，边界条件处理完整</div>
+          <div class="sec__li">对灰度切流与回滚预案有明确分层设计，风险意识强</div>
+          <div class="sec__li sec__li--warning">薪资预期 45K 超出编制上限 42K，需与用人部门确认</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec__hd">候选人提问</div>
+        <div class="sec__list">
+          <div class="sec__li">团队当前的发布节奏与线上值班机制是怎样的？</div>
+          <div class="sec__li">技术线未来半年是否会做云原生迁移？</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack" style="height:100%">
+      <div class="card" style="display:flex;flex-direction:column;flex:1 1 auto">
+        <div class="card__hd"><span class="card__title">面试评价</span></div>
+        <div class="card__bd" style="display:flex;flex-direction:column;gap:18px">
+          <div class="field">
+            <label class="field__label">能力维度评分</label>
+            <div class="score-list">
+              <div class="score"><span>专业能力</span><span class="score__v">4.5/5</span></div>
+              <div class="score"><span>沟通表达</span><span class="score__v">4.5/5</span></div>
+              <div class="score"><span>项目经验</span><span class="score__v">4.0/5</span></div>
+              <div class="score"><span>团队协作</span><span class="score__v">4.0/5</span></div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field__label">面试结论</label>
+            <select class="select"><option>进入下一轮</option><option>待定</option><option>不通过</option></select>
+          </div>
+
+          <div class="field">
+            <label class="field__label">评价意见</label>
+            <textarea class="textarea" style="height:88px">技术基础扎实，高并发场景有完整落地经验，建议进入终面考察架构设计能力。</textarea>
+            <a class="link" href="#" style="margin-top:2px">AI 辅助生成评价意见</a>
+          </div>
+        </div>
+        <div class="card__ft">
+          <button class="btn btn--default" type="button" style="border:0">保存草稿</button>
+          <a class="btn btn--primary" href="s5-candidate.html">提交评价</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    </div>
+  </main>
+
+</div>
+</body>
+</html>

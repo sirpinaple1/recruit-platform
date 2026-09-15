@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tritree 招聘 · 登录（应聘者 / 员工）</title>
+<style>
+/* ============================================================
+   Design Tokens —— 与 Ardot 设计稿《登录页 v3》严格对齐
+   ============================================================ */
+:root{
+  --primary:#2D5BE3;
+  --text:#101828;
+  --text-2:#667085;
+  --text-3:#98A2B3;
+  --text-4:#344054;
+  --border:#E4E7EC;
+  --line:#EAECF0;
+  --danger:#DC2626;
+  --success:#12A150;
+
+  /* 角色色板 —— 与参照稿 AnimatedCharacters 逐值一致 */
+  --char-purple:#6C3FF5;
+  --char-black:#2D2D2D;
+  --char-orange:#FF9B6B;
+  --char-yellow:#E8D754;
+
+  --radius-input:8px;
+  --radius-pill:24px;
+
+  --ease:cubic-bezier(.65,0,.35,1);
+  --ease-soft:cubic-bezier(.22,.61,.36,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+[hidden]{display:none !important;}
+html,body{height:100%;}
+body{
+  font-family:"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  color:var(--text);
+  background:#fff;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;border:0;background:none;cursor:pointer;}
+
+/* ============================================================
+   壳层：左右二分屏（720 / 720）
+   ============================================================ */
+.app{display:flex;width:100%;height:100vh;overflow:hidden;background:#fff;}
+
+/* ---------- 左区 · 品牌插画 ---------- */
+.brand{
+  position:relative;flex:0 0 720px;width:720px;height:100%;
+  padding:48px;overflow:hidden;
+  display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;
+}
+/* 双层渐变做角色切换时的交叉淡入（CSS 渐变无法直接 transition） */
+.brand__bg{position:absolute;inset:0;z-index:0;transition:opacity .55s var(--ease-soft);}
+/* 20px 白色网格 —— 照搬参照稿 bg-grid-white/[0.05] + bg-[size:20px_20px] */
+.brand::before{
+  content:'';position:absolute;inset:0;z-index:1;pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+  background-size:20px 20px;
+}
+.brand__bg--candidate{background:linear-gradient(135deg,#4E5C80 0%,#64719A 50%,#7E8AA8 100%);opacity:1;}
+.brand__bg--employee {background:linear-gradient(135deg,#354271 0%,#465A8A 50%,#5F6FA8 100%);opacity:0;}
+.brand.is-employee .brand__bg--candidate{opacity:0;}
+.brand.is-employee .brand__bg--employee {opacity:1;}
+
+.brand__glow{position:absolute;z-index:1;border-radius:50%;pointer-events:none;}
+.glow-a{left:284px;top:200px;width:256px;height:256px;
+  background:radial-gradient(circle,rgba(255,255,255,.18) 0%,rgba(255,255,255,0) 70%);}
+.glow-b{left:160px;top:300px;width:384px;height:384px;
+  background:radial-gradient(circle,rgba(255,255,255,.13) 0%,rgba(255,255,255,0) 70%);}
+
+.brand__logo{position:relative;z-index:2;display:flex;align-items:center;gap:10px;}
+.brand__logobox{width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.16);
+  display:flex;align-items:center;justify-content:center;}
+.brand__wordmark{font-size:18px;font-weight:600;color:#fff;transition:opacity .3s var(--ease-soft);}
+
+/* 角色舞台：450×400，底部对齐在 500 高的容器里 */
+.brand__stagewrap{position:relative;z-index:2;width:100%;height:500px;
+  display:flex;align-items:flex-end;justify-content:center;}
+
+/* ---- 几何角色 · 过渡参数严格照搬 CareerCompass《AnimatedCharacters》----
+   角色与眼白 700ms ease-in-out；橙/黄瞳孔组与嘴 200ms ease-out；
+   瞳孔自身 100ms ease-out；眼白开合 150ms。
+   基准位置走 left/top（只在姿态切换时变一次），鼠标跟随走 transform（可走合成层）。 */
+.stage{position:relative;width:450px;height:400px;}
+
+.char{position:absolute;bottom:0;transform-origin:bottom center;
+  transition:transform .7s ease-in-out,height .7s ease-in-out;}
+.char--purple{left:70px; width:180px;height:400px;border-radius:10px 10px 0 0;background:var(--char-purple);z-index:1;}
+.char--black {left:240px;width:120px;height:310px;border-radius:8px 8px 0 0;  background:var(--char-black); z-index:2;}
+.char--orange{left:0;   width:240px;height:200px;border-radius:120px 120px 0 0;background:var(--char-orange);z-index:3;}
+.char--yellow{left:310px;width:140px;height:230px;border-radius:70px 70px 0 0;background:var(--char-yellow);z-index:4;}
+
+/* 容器固定高度 + 垂直居中：闭眼时眼睛收缩，闭合线仍留在原位，不会向上一跳 */
+.char__eyes{position:absolute;display:flex;align-items:center;
+  transition:transform .7s ease-in-out,left .7s ease-in-out,top .7s ease-in-out;}
+.char--purple .char__eyes{left:45px;top:40px;height:18px;gap:32px;}
+.char--black  .char__eyes{left:26px;top:32px;height:16px;gap:24px;}
+.char--orange .char__eyes{left:82px;top:90px;height:12px;gap:32px;
+  transition:transform .2s ease-out,left .2s ease-out,top .2s ease-out;}
+.char--yellow .char__eyes{left:52px;top:40px;height:12px;gap:24px;
+  transition:transform .2s ease-out,left .2s ease-out,top .2s ease-out;}
+
+.eye{width:18px;height:18px;border-radius:9px;background:#fff;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  transition:height .15s ease-in-out;}
+.char--black .eye{width:16px;height:16px;border-radius:8px;}
+.eye i{display:block;width:7px;height:7px;border-radius:3.5px;background:var(--char-black);
+  transition:transform .1s ease-out,opacity .15s ease-out;}
+.char--black .eye i{width:6px;height:6px;border-radius:3px;}
+/* 眨眼：眼白压到 2px，瞳孔随裁剪消失（照搬参照稿 isBlinking → height:2px） */
+.eye.is-blinking{height:2px;}
+.eye.is-blinking i{opacity:0;}
+
+/* 隐藏态（密码已输入且处于遮蔽态）：角色扭头背过密码框 + 闭上双眼 */
+.stage.is-hiding .eye{height:2px;}
+.stage.is-hiding .eye i{opacity:0;}
+
+/* 橙 / 黄只有瞳孔，闭眼 = 圆点收成一道横线 */
+.stage.is-hiding .dot{width:17px;height:3px;border-radius:1.5px;}
+
+/* 橙 / 黄只有瞳孔，没有眼白 */
+.dot{display:block;width:12px;height:12px;border-radius:6px;background:var(--char-black);
+  transition:transform .1s ease-out,width .16s ease-in-out,height .16s ease-in-out,border-radius .16s ease-in-out;}
+.char--yellow .char__mouth{position:absolute;left:40px;top:88px;width:80px;height:4px;border-radius:2px;
+  background:var(--char-black);
+  transition:transform .2s ease-out,left .2s ease-out,top .2s ease-out;}
+
+.brand__legal{position:relative;z-index:2;display:flex;gap:32px;}
+.brand__legal a{font-size:13px;color:rgba(255,255,255,.75);text-decoration:none;transition:color .2s;}
+.brand__legal a:hover{color:#fff;}
+
+/* ---------- 右区 · 登录表单 ---------- */
+.panel{flex:1 1 auto;height:100%;display:flex;flex-direction:column;background:#fff;min-width:0;}
+
+.panel__top{display:flex;align-items:center;justify-content:space-between;
+  height:64px;padding:0 32px;flex:0 0 auto;}
+.panel__domain{font-size:12px;color:var(--text-3);}
+.panel__switch{font-size:12px;font-weight:500;color:var(--primary);padding:4px 0;transition:opacity .2s;}
+.panel__switch:hover{opacity:.72;}
+
+.panel__center{flex:1 1 auto;display:flex;align-items:center;justify-content:center;padding:0 24px;}
+
+.form{width:420px;display:flex;flex-direction:column;gap:40px;
+  transition:opacity .18s var(--ease-soft);}
+.form.is-switching{opacity:0;}
+
+.form__head{display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center;}
+.form__title{font-size:30px;font-weight:700;letter-spacing:-.4px;}
+.form__sub{font-size:14px;color:var(--text-2);line-height:1.6;}
+
+.form__body{display:flex;flex-direction:column;gap:20px;}
+
+.field{display:flex;flex-direction:column;gap:8px;}
+.field__label{font-size:14px;font-weight:500;color:var(--text-4);}
+
+.input{display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;
+  border:1px solid var(--border);border-radius:var(--radius-input);background:#fff;
+  transition:border-color .2s var(--ease-soft),box-shadow .2s var(--ease-soft);}
+.input:focus-within{border-color:var(--primary);}
+.input.is-error{border-color:var(--danger);}
+.input__prefix{font-size:14px;font-weight:500;color:var(--text);flex:0 0 auto;}
+.input__divider{width:1px;height:18px;background:var(--line);flex:0 0 auto;}
+.input input{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;
+  font-family:inherit;font-size:14px;color:var(--text);}
+.input input::placeholder{color:var(--text-3);}
+.input__eye{display:flex;align-items:center;justify-content:center;width:20px;height:20px;
+  flex:0 0 auto;opacity:.9;transition:opacity .2s;}
+.input__eye:hover{opacity:.6;}
+
+.form__row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.check{display:flex;align-items:center;gap:8px;cursor:pointer;}
+.check input{position:absolute;opacity:0;width:0;height:0;}
+.check__box{position:relative;width:16px;height:16px;border:1px solid var(--border);border-radius:4px;
+  background:#fff;transition:background .2s,border-color .2s;}
+.check__box svg{position:absolute;inset:0;margin:auto;opacity:0;transform:scale(.6);
+  transition:opacity .18s,transform .18s;}
+.check input:checked + .check__box{background:var(--primary);border-color:var(--primary);}
+.check input:checked + .check__box svg{opacity:1;transform:scale(1);}
+.check__text{font-size:13px;color:var(--text-2);}
+.link{font-size:13px;font-weight:500;color:var(--primary);text-decoration:none;transition:opacity .2s;}
+.link:hover{opacity:.72;}
+
+/* 错误 / 成功提示条 */
+.alert{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;
+  font-size:12px;line-height:1.5;
+  animation:alertIn .22s var(--ease-soft);}
+.alert--error{background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.3);color:var(--danger);}
+.alert--ok{background:rgba(18,161,80,.1);border:1px solid rgba(18,161,80,.3);color:var(--success);}
+@keyframes alertIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+
+/* ---------- 主行动按钮 · InteractiveHoverButton（胶囊） ---------- */
+.pill{position:relative;display:flex;align-items:center;justify-content:center;
+  width:100%;height:48px;padding:0 24px;border:1px solid var(--border);
+  border-radius:var(--radius-pill);background:#fff;overflow:hidden;}
+.pill__bg{position:absolute;inset:0;background:var(--primary);
+  transform:scaleX(0);transform-origin:left center;
+  transition:transform .38s var(--ease),opacity .3s;}
+.pill__text{position:relative;z-index:1;display:flex;align-items:center;gap:8px;
+  font-size:16px;font-weight:600;color:var(--text);
+  transition:transform .38s var(--ease),opacity .26s var(--ease);}
+.pill__text--hover{position:absolute;inset:0;justify-content:center;color:#fff;
+  transform:translateX(-72px);opacity:0;pointer-events:none;}
+.pill:hover .pill__bg{transform:scaleX(1);}
+.pill:hover .pill__text--rest{transform:translateX(72px);opacity:0;}
+.pill:hover .pill__text--hover{transform:translateX(0);opacity:1;}
+.pill:active{transform:scale(.995);}
+
+.pill__loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+  gap:8px;font-size:16px;font-weight:600;color:#fff;z-index:2;}
+.pill.is-loading{cursor:default;}
+.pill.is-loading .pill__bg{transform:scaleX(1);opacity:.45;transition:transform .38s var(--ease),opacity .3s;}
+.pill.is-loading .pill__text{opacity:0;}
+.pill.is-loading .pill__loading{display:flex;}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;
+  border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+.pill.is-done .pill__bg{transform:scaleX(1);opacity:1;}
+.pill.is-done .pill__text--rest{transform:translateX(72px);opacity:0;}
+
+/* ---------- 社交 + 页脚 ---------- */
+.form__foot{display:flex;flex-direction:column;gap:16px;}
+.social{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;height:48px;padding:0 24px;border:1px solid var(--border);
+  border-radius:var(--radius-pill);background:#fff;
+  font-size:14px;font-weight:500;color:var(--text-4);
+  transition:border-color .25s,background .25s,color .25s;}
+.social:hover{border-color:var(--primary);background:#F7F9FF;color:var(--primary);}
+.social svg{flex:0 0 auto;}
+.icon--qr{display:none;}
+.app.is-employee .icon--qr{display:block;}
+.app.is-employee .icon--wechat{display:none;}
+
+.form__signup{display:flex;align-items:center;justify-content:center;gap:4px;padding-top:8px;
+  font-size:13px;color:var(--text-2);}
+.form__signup a{font-size:13px;font-weight:500;color:var(--primary);text-decoration:none;transition:opacity .2s;}
+.form__signup a:hover{opacity:.72;}
+
+/* ---------- 响应式：lg 断点以下收起插画 ---------- */
+@media (max-width:1023px){
+  .brand{display:none;}
+  .panel__center{padding:0 20px;}
+}
+</style>
+</head>
+<body>
+
+<div class="app is-candidate" id="app">
+
+  <!-- ===================== 左区 · 品牌插画 ===================== -->
+  <aside class="brand" id="brand">
+    <div class="brand__bg brand__bg--candidate"></div>
+    <div class="brand__bg brand__bg--employee"></div>
+    <div class="brand__glow glow-a"></div>
+    <div class="brand__glow glow-b"></div>
+
+    <div class="brand__logo">
+      <div class="brand__logobox">
+        <svg width="20" height="20" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15 3 L22 13 H18.5 L24 22 H6 L11.5 13 H8 L15 3 Z" fill="#FFFFFF"/>
+          <rect x="13" y="22" width="4" height="5" rx="1" fill="#FFFFFF" opacity="0.65"/>
+        </svg>
+      </div>
+      <span class="brand__wordmark" id="wordmark">Tritree 招聘</span>
+    </div>
+
+    <!-- 几何角色舞台：450×400，容器 500 高底部对齐 -->
+    <div class="brand__stagewrap">
+      <div class="stage" id="stage">
+        <!-- 角色1 · 紫（后层） -->
+        <div class="char char--purple" id="charPurple">
+          <div class="char__eyes" id="eyesPurple">
+            <span class="eye"><i></i></span>
+            <span class="eye"><i></i></span>
+          </div>
+        </div>
+        <!-- 角色2 · 黑（中层） -->
+        <div class="char char--black" id="charBlack">
+          <div class="char__eyes" id="eyesBlack">
+            <span class="eye"><i></i></span>
+            <span class="eye"><i></i></span>
+          </div>
+        </div>
+        <!-- 角色3 · 橙（前左） -->
+        <div class="char char--orange" id="charOrange">
+          <div class="char__eyes" id="eyesOrange">
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+        </div>
+        <!-- 角色4 · 黄（前右） -->
+        <div class="char char--yellow" id="charYellow">
+          <div class="char__eyes" id="eyesYellow">
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+          <div class="char__mouth" id="mouthYellow"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="brand__legal">
+      <a href="#">隐私政策</a>
+      <a href="#">服务条款</a>
+    </div>
+  </aside>
+
+  <!-- ===================== 右区 · 登录表单 ===================== -->
+  <main class="panel">
+    <header class="panel__top">
+      <span class="panel__domain" id="domainLabel">招聘官网 · 应聘者入口</span>
+      <button class="panel__switch" id="switchBtn" type="button">员工登录 →</button>
+    </header>
+
+    <div class="panel__center">
+      <form class="form" id="form" novalidate>
+        <div class="form__head">
+          <h1 class="form__title" id="formTitle">欢迎回来</h1>
+          <p class="form__sub" id="formSub">请输入账号信息，登录后查看投递进度与面试安排</p>
+        </div>
+
+        <div class="form__body">
+          <!-- 账号 -->
+          <div class="field">
+            <label class="field__label" id="accountLabel" for="account">手机号</label>
+            <div class="input" id="accountWrap">
+              <span class="input__prefix" id="accountPrefix">+86</span>
+              <span class="input__divider" id="accountDivider"></span>
+              <input id="account" type="tel" placeholder="请输入手机号" autocomplete="username">
+            </div>
+          </div>
+
+          <!-- 密码 -->
+          <div class="field">
+            <label class="field__label" for="password">密码</label>
+            <div class="input" id="passwordWrap">
+              <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password">
+              <button class="input__eye" id="eyeBtn" type="button" aria-label="显示密码">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M2 10C2 10 5 4.8 10 4.8S18 10 18 10s-3 5.2-8 5.2S2 10 2 10Z" stroke="#98A2B3" stroke-width="1.4" stroke-linejoin="round"/>
+                  <circle cx="10" cy="10" r="2.4" stroke="#98A2B3" stroke-width="1.4"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 记住我 / 忘记密码 -->
+          <div class="form__row">
+            <label class="check">
+              <input type="checkbox" id="remember" checked>
+              <span class="check__box">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1.5 5.2 3.8 7.5 8.5 2.8" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="check__text" id="rememberText">30 天内自动登录</span>
+            </label>
+            <a class="link" href="#">忘记密码？</a>
+          </div>
+
+          <!-- 提示条 -->
+          <div class="alert alert--error" id="alert" hidden>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="7" cy="7" r="6" stroke="#DC2626" stroke-width="1.3"/>
+              <path d="M7 3.8v3.6" stroke="#DC2626" stroke-width="1.3" stroke-linecap="round"/>
+              <circle cx="7" cy="9.9" r="0.8" fill="#DC2626"/>
+            </svg>
+            <span id="alertText">手机号或密码不正确</span>
+          </div>
+
+          <!-- 主行动 -->
+          <button class="pill" id="submitBtn" type="submit">
+            <span class="pill__bg"></span>
+            <span class="pill__text pill__text--rest" id="btnLabel">登 录</span>
+            <span class="pill__text pill__text--hover">
+              登 录
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 8h9.5M9 4.5 12.5 8 9 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="pill__loading"><span class="spinner"></span>登录中…</span>
+          </button>
+
+          <!-- 社交 + 页脚 -->
+          <div class="form__foot">
+            <button class="social" id="socialBtn" type="button">
+              <svg class="icon--wechat" width="20" height="20" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 2C4.7 2 2 4.2 2 7c0 1.6.8 3 2.1 3.9l-.5 1.8 1.9-1c.8.2 1.6.3 2.5.3 3.3 0 6-2.2 6-5s-2.7-5-6-5Z" stroke="#07C160" stroke-width="1.4" stroke-linejoin="round"/>
+                <circle cx="6" cy="6.4" r="0.9" fill="#07C160"/>
+                <circle cx="10" cy="6.4" r="0.9" fill="#07C160"/>
+              </svg>
+              <svg class="icon--qr" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="6" height="6" rx="1.6" stroke="#2D5BE3" stroke-width="1.4"/>
+                <rect x="12" y="2" width="6" height="6" rx="1.6" stroke="#2D5BE3" stroke-width="1.4"/>
+                <rect x="2" y="12" width="6" height="6" rx="1.6" stroke="#2D5BE3" stroke-width="1.4"/>
+                <path d="M12 12h2.6v2.6H12z" fill="#2D5BE3"/>
+                <path d="M16.6 12H18v2.6M12 16.6v1.4h2.6M16.6 16.6H18V18h-1.4" stroke="#2D5BE3" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
+              <span id="socialText">使用微信登录</span>
+            </button>
+
+            <div class="form__signup">
+              <span id="footA">还没有账号？</span>
+              <a href="#" id="footB">立即注册</a>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var app       = document.getElementById('app');
+  var brand     = document.getElementById('brand');
+  var stage     = document.getElementById('stage');
+  var form      = document.getElementById('form');
+  var account   = document.getElementById('account');
+  var password  = document.getElementById('password');
+  var eyeBtn    = document.getElementById('eyeBtn');
+  var alertBox  = document.getElementById('alert');
+  var alertText = document.getElementById('alertText');
+  var submitBtn = document.getElementById('submitBtn');
+  var accountWrap = document.getElementById('accountWrap');
+  var passwordWrap= document.getElementById('passwordWrap');
+
+  /* ==========================================================
+     一、角色配置：应聘者 / 员工 两套文案与视觉
+     ========================================================== */
+  var ROLES = {
+    candidate: {
+      domain:'招聘官网 · 应聘者入口',
+      switchTo:'员工登录 →',
+      title:'欢迎回来',
+      sub:'请输入账号信息，登录后查看投递进度与面试安排',
+      wordmark:'Tritree 招聘',
+      accountLabel:'手机号',
+      accountPlaceholder:'请输入手机号',
+      showPrefix:true,
+      social:'使用微信登录',
+      remember:'30 天内自动登录',
+      footA:'还没有账号？',
+      footB:'立即注册'
+    },
+    employee: {
+      domain:'内部系统 · 员工入口',
+      switchTo:'你是应聘者？前往招聘官网 →',
+      title:'员工登录',
+      sub:'使用企业账号进入招聘工作台，与应聘者账号体系相互独立',
+      wordmark:'Tritree 招聘工作台',
+      accountLabel:'企业账号',
+      accountPlaceholder:'工号 / 企业邮箱',
+      showPrefix:false,
+      social:'使用钉钉扫码登录',
+      remember:'7 天内自动登录',
+      footA:'还没有企业账号？',
+      footB:'联系 HR 管理员开通'
+    }
+  };
+  var role = 'candidate';
+
+  function renderRole(next){
+    var cfg = ROLES[next];
+    role = next;
+    app.classList.toggle('is-employee', next === 'employee');
+    brand.classList.toggle('is-employee', next === 'employee');
+
+    document.getElementById('domainLabel').textContent    = cfg.domain;
+    document.getElementById('switchBtn').textContent      = cfg.switchTo;
+    document.getElementById('formTitle').textContent      = cfg.title;
+    document.getElementById('formSub').textContent        = cfg.sub;
+    document.getElementById('wordmark').textContent       = cfg.wordmark;
+    document.getElementById('accountLabel').textContent   = cfg.accountLabel;
+    document.getElementById('socialText').textContent     = cfg.social;
+    document.getElementById('rememberText').textContent   = cfg.remember;
+    document.getElementById('footA').textContent          = cfg.footA;
+    document.getElementById('footB').textContent          = cfg.footB;
+
+    account.placeholder = cfg.accountPlaceholder;
+    account.type = cfg.showPrefix ? 'tel' : 'text';
+    document.getElementById('accountPrefix').hidden  = !cfg.showPrefix;
+    document.getElementById('accountDivider').hidden = !cfg.showPrefix;
+
+    clearAlert();
+    resetButton();
+  }
+
+  document.getElementById('switchBtn').addEventListener('click', function(){
+    // 表单淡出 → 换角色 → 淡入
+    form.classList.add('is-switching');
+    setTimeout(function(){
+      renderRole(role === 'candidate' ? 'employee' : 'candidate');
+      form.classList.remove('is-switching');
+    }, 180);
+  });
+
+  /* ==========================================================
+     二、几何角色引擎 —— 姿态沿用 CareerCompass《AnimatedCharacters》，
+         隐藏态按需求做了定向增强（扭头 + 闭眼）
+     三个状态输入：
+       isTyping   账号框聚焦          → 紫角色升到 440 + skewX(bodySkew-12) + 右移 40（凑近看）
+       isHiding   密码已输入且遮蔽    → 紫角色落回 400 + skewX(12) + 左移 40（扭头背过），
+                                       全部角色闭眼，瞳孔不再跟随鼠标
+       isPlain    密码已输入且明文    → 全角色 skewX(0) 立正，紫角色周期性偷瞄
+     驱动方式：事件 → 写 inline style → 交给 CSS transition 插值。
+     原先「每帧 rAF 轮询 + 往 .stage 写 CSS 变量」的做法已移除：
+     那种写法会让整棵子树每帧重新计算样式，且鼠标静止时也在空转。
+     ========================================================== */
+  var charPurple  = document.getElementById('charPurple');
+  var charBlack   = document.getElementById('charBlack');
+  var charOrange  = document.getElementById('charOrange');
+  var charYellow  = document.getElementById('charYellow');
+  var eyesPurple  = document.getElementById('eyesPurple');
+  var eyesBlack   = document.getElementById('eyesBlack');
+  var eyesOrange  = document.getElementById('eyesOrange');
+  var eyesYellow  = document.getElementById('eyesYellow');
+  var mouthYellow = document.getElementById('mouthYellow');
+
+  var isTyping             = false;
+  var showPassword         = false;
+  var passwordLength       = 0;
+  var isLookingAtEachOther = false;
+  var isPurplePeeking      = false;
+  var togetherTimer = null, peekTimer = null;
+
+  var mouseX = 0, mouseY = 0, stageBox = null;
+  var hasPointer = false;   // 鼠标未移动过之前保持直立，避免首屏角色无故偏斜
+
+  function clamp(v, min, max){ return v < min ? min : (v > max ? max : v); }
+  function isHiding(){ return passwordLength > 0 && !showPassword; }
+  function isPlain(){  return passwordLength > 0 && showPassword; }
+
+  // 角色静态几何（stage 局部坐标）—— 与参照稿逐值一致
+  var CHARS = {
+    purple: {el:charPurple, eyes:eyesPurple, pupils:eyesPurple.querySelectorAll('.eye'),
+             left:70,  width:180, height:400, gap:32, eyeSize:18, pupilSize:7, maxDist:5},
+    black:  {el:charBlack,  eyes:eyesBlack,  pupils:eyesBlack.querySelectorAll('.eye'),
+             left:240, width:120, height:310, gap:24, eyeSize:16, pupilSize:6, maxDist:4},
+    orange: {el:charOrange, eyes:eyesOrange, pupils:eyesOrange.querySelectorAll('.dot'),
+             left:0,   width:240, height:200, gap:32, pupilSize:12, maxDist:5},
+    yellow: {el:charYellow, eyes:eyesYellow, pupils:eyesYellow.querySelectorAll('.dot'),
+             left:310, width:140, height:230, gap:24, pupilSize:12, maxDist:5}
+  };
+  // 眼睛组基准位置（照搬参照稿的 left / top；away = 隐藏态下把眼睛挪向背离表单的一侧）
+  var EYES = {
+    purple: {plain:[20,35], together:[55,65], follow:[45,40], away:[30,37]},
+    black:  {plain:[10,28], together:[32,12], follow:[26,32], away:[14,29]},
+    orange: {plain:[50,85], follow:[82,90], away:[62,87]},
+    yellow: {plain:[20,35], follow:[52,40], away:[34,37]}
+  };
+
+  function measure(){
+    var r = stage.getBoundingClientRect();
+    stageBox = {left:r.left, top:r.top, height:r.height};
+  }
+
+  // 参照稿 calculatePosition()：faceX ±15 / faceY ±10 / bodySkew ±6，
+  // 参考点取角色高度 1/3 处（rect.top + height/3）
+  function calcPosition(c, h){
+    var cx = stageBox.left + c.left + c.width / 2;
+    var cy = stageBox.top + stageBox.height - h + h / 3;
+    var dX = mouseX - cx, dY = mouseY - cy;
+    return {
+      faceX:    clamp(dX / 20,   -15, 15),
+      faceY:    clamp(dY / 30,   -10, 10),
+      bodySkew: clamp(-dX / 120,  -6,  6)
+    };
+  }
+
+  // 参照稿 Pupil / EyeBall 的 calculatePupilPosition()：限定最大位移后按角度投射
+  function pupilOffset(cx, cy, maxDist, forceX, forceY){
+    if (forceX !== undefined && forceY !== undefined) return {x:forceX, y:forceY};
+    if (!hasPointer) return {x:0, y:0};
+    var dX = mouseX - cx, dY = mouseY - cy;
+    var dist = Math.min(Math.sqrt(dX * dX + dY * dY), maxDist);
+    var ang  = Math.atan2(dY, dX);
+    return {x: Math.cos(ang) * dist, y: Math.sin(ang) * dist};
+  }
+
+  // 画一个角色的眼睛：基准位置走 left/top（姿态切换时变），鼠标偏移走 transform（每帧）
+  function paintEyes(c, base, offset, forceLook, h){
+    // 基准位置只在姿态切换时写一次：left/top 会触发元素重排，不适合每帧写入
+    if (c._baseL !== base[0]){ c.eyes.style.left = base[0] + 'px'; c._baseL = base[0]; }
+    if (c._baseT !== base[1]){ c.eyes.style.top  = base[1] + 'px'; c._baseT = base[1]; }
+    c.eyes.style.transform = 'translate(' + offset[0].toFixed(2) + 'px,' + offset[1].toFixed(2) + 'px)';
+
+    var size = c.eyeSize || c.pupilSize;
+    var x0 = stageBox.left + c.left + base[0] + size / 2;
+    var y0 = stageBox.top + stageBox.height - h + base[1] + size / 2;
+    for (var i = 0; i < c.pupils.length; i++){
+      var p = pupilOffset(x0 + i * (size + c.gap), y0, c.maxDist,
+                          forceLook ? forceLook[0] : undefined,
+                          forceLook ? forceLook[1] : undefined);
+      c.pupils[i].style.transform = 'translate(' + p.x.toFixed(2) + 'px,' + p.y.toFixed(2) + 'px)';
+    }
+  }
+
+  function renderStage(){
+    if (!stageBox) measure();
+
+    // 闭眼由 CSS 承担（少写 8 个内联样式，也让收缩走硬件友好的 height/opacity 过渡）
+    var hiding = isHiding();
+    if (stage._hiding !== hiding){ stage.classList.toggle('is-hiding', hiding); stage._hiding = hiding; }
+
+    // 隐藏态不再抬身（抬身＝凑近看）；「扭头背过」本身就是姿态变化
+    var hP = isTyping ? 440 : 400;
+    var tb, to, tf;
+
+    /* ---- 角色1 · 紫（后层）---- */
+    var p = calcPosition(CHARS.purple, hP);
+    if (hiding)                    { tb = EYES.purple.away;     to = [0, 0];            tf = [0, 0]; }
+    else if (isPlain())            { tb = EYES.purple.plain;    to = [0, 0];            tf = isPurplePeeking ? [4, 5] : [-4, -4]; }
+    else if (isLookingAtEachOther) { tb = EYES.purple.together; to = [0, 0];            tf = [3, 4]; }
+    else                           { tb = EYES.purple.follow;   to = [p.faceX, p.faceY]; tf = null; }
+
+    // 高度只在 isTyping 切换时变一次，不参与逐帧写入
+    if (CHARS.purple._h !== hP){ CHARS.purple.el.style.height = hP + 'px'; CHARS.purple._h = hP; }
+    // 隐藏态：固定向左倾 12° + 左移 40px（与凑近时的 −12°/右移 40px 镜像），且不跟随鼠标
+    CHARS.purple.el.style.transform = hiding
+      ? 'skewX(12deg) translateX(-40px)'
+      : isPlain()
+        ? 'skewX(0deg)'
+        : isTyping
+          ? 'skewX(' + (p.bodySkew - 12) + 'deg) translateX(40px)'
+          : 'skewX(' + p.bodySkew + 'deg)';
+    paintEyes(CHARS.purple, tb, to, tf, hP);
+
+    /* ---- 角色2 · 黑（中层）---- */
+    var b = calcPosition(CHARS.black, CHARS.black.height);
+    if (hiding)                    { tb = EYES.black.away;     to = [0, 0];            tf = [0, 0]; }
+    else if (isPlain())            { tb = EYES.black.plain;    to = [0, 0];            tf = [-4, -4]; }
+    else if (isLookingAtEachOther) { tb = EYES.black.together; to = [0, 0];            tf = [0, -4]; }
+    else                           { tb = EYES.black.follow;   to = [b.faceX, b.faceY]; tf = null; }
+
+    CHARS.black.el.style.transform = hiding
+      ? 'skewX(10deg)'
+      : isPlain()
+        ? 'skewX(0deg)'
+        : isLookingAtEachOther
+          ? 'skewX(' + (b.bodySkew * 1.5 + 10) + 'deg) translateX(20px)'
+          : isTyping
+            ? 'skewX(' + (b.bodySkew * 1.5) + 'deg)'
+            : 'skewX(' + b.bodySkew + 'deg)';
+    paintEyes(CHARS.black, tb, to, tf, CHARS.black.height);
+
+    /* ---- 角色3 · 橙（前左）---- */
+    var o = calcPosition(CHARS.orange, CHARS.orange.height);
+    CHARS.orange.el.style.transform = hiding
+      ? 'skewX(8deg)'
+      : isPlain() ? 'skewX(0deg)' : 'skewX(' + o.bodySkew + 'deg)';
+    paintEyes(CHARS.orange,
+      hiding ? EYES.orange.away : isPlain() ? EYES.orange.plain : EYES.orange.follow,
+      hiding ? [0, 0] : isPlain() ? [0, 0] : [o.faceX, o.faceY],
+      hiding ? [0, 0] : isPlain() ? [-5, -4] : null, CHARS.orange.height);
+
+    /* ---- 角色4 · 黄（前右）---- */
+    var y = calcPosition(CHARS.yellow, CHARS.yellow.height);
+    CHARS.yellow.el.style.transform = hiding
+      ? 'skewX(8deg)'
+      : isPlain() ? 'skewX(0deg)' : 'skewX(' + y.bodySkew + 'deg)';
+    paintEyes(CHARS.yellow,
+      hiding ? EYES.yellow.away : isPlain() ? EYES.yellow.plain : EYES.yellow.follow,
+      hiding ? [0, 0] : isPlain() ? [0, 0] : [y.faceX, y.faceY],
+      hiding ? [0, 0] : isPlain() ? [-5, -4] : null, CHARS.yellow.height);
+
+    var mBase = isPlain() ? [10, 88] : [40, 88];
+    if (CHARS.yellow._mbL !== mBase[0]){ mouthYellow.style.left = mBase[0] + 'px'; CHARS.yellow._mbL = mBase[0]; }
+    if (CHARS.yellow._mbT !== mBase[1]){ mouthYellow.style.top  = mBase[1] + 'px'; CHARS.yellow._mbT = mBase[1]; }
+    mouthYellow.style.transform = (hiding || isPlain())
+      ? 'translate(0,0)'
+      : 'translate(' + y.faceX.toFixed(2) + 'px,' + y.faceY.toFixed(2) + 'px)';
+  }
+
+  /* ---- 鼠标：rAF 合并；鼠标静止时完全不写样式 ---- */
+  var moveQueued = false;
+  document.addEventListener('pointermove', function(e){
+    mouseX = e.clientX; mouseY = e.clientY;
+    if (moveQueued) return;
+    moveQueued = true;
+    requestAnimationFrame(function(){ moveQueued = false; renderStage(); });
+  }, {passive:true});
+  window.addEventListener('resize', function(){ measure(); renderStage(); });
+  // 字体加载会微调左区布局，load 后再校准一次几何缓存
+  window.addEventListener('load', function(){ measure(); renderStage(); });
+
+  /* ---- 眨眼：紫 / 黑各自独立，间隔 3–7s，持续 150ms（橙黄不眨）---- */
+  function blinkLoop(eyes){
+    setTimeout(function(){
+      for (var i = 0; i < eyes.length; i++) eyes[i].classList.add('is-blinking');
+      setTimeout(function(){
+        for (var i = 0; i < eyes.length; i++) eyes[i].classList.remove('is-blinking');
+        blinkLoop(eyes);
+      }, 150);
+    }, Math.random() * 4000 + 3000);
+  }
+  blinkLoop(CHARS.purple.eyes.querySelectorAll('.eye'));
+  blinkLoop(CHARS.black.eyes.querySelectorAll('.eye'));
+
+  /* ---- 对视 800ms：账号框聚焦时触发一次 ---- */
+  function lookAtEachOther(){
+    isLookingAtEachOther = true;
+    renderStage();
+    clearTimeout(togetherTimer);
+    togetherTimer = setTimeout(function(){
+      isLookingAtEachOther = false;
+      renderStage();
+    }, 800);
+  }
+
+  /* ---- 偷瞄：密码已输入且为明文时，2–5s 一次，持续 800ms ---- */
+  function schedulePeek(){
+    clearTimeout(peekTimer);
+    if (!isPlain()){ isPurplePeeking = false; return; }
+    peekTimer = setTimeout(function(){
+      isPurplePeeking = true;
+      renderStage();
+      setTimeout(function(){
+        isPurplePeeking = false;
+        renderStage();
+        schedulePeek();
+      }, 800);
+    }, Math.random() * 3000 + 2000);
+  }
+
+  /* ==========================================================
+     三、状态同步与事件绑定
+     ========================================================== */
+  function syncState(){
+    var nextShow = (password.type === 'text');
+    var nextLen  = password.value.length;
+    var changed  = (nextShow !== showPassword) || (nextLen !== passwordLength);
+    showPassword   = nextShow;
+    passwordLength = nextLen;
+    renderStage();
+    if (changed) schedulePeek();
+  }
+
+  // 账号框聚焦（对应参照稿 email 的 onFocus / onBlur）→ isTyping
+  account.addEventListener('focus', function(){
+    isTyping = true;
+    lookAtEachOther();
+  });
+  account.addEventListener('blur', function(){
+    isTyping = false;
+    isLookingAtEachOther = false;
+    clearTimeout(togetherTimer);
+    renderStage();
+  });
+  account.addEventListener('input', clearAlert);
+
+  // 密码框只影响「已输入长度 / 明文态」，不触发 isTyping（与参照稿一致）
+  password.addEventListener('focus', syncState);
+  password.addEventListener('blur',  syncState);
+  password.addEventListener('input', function(){ clearAlert(); syncState(); });
+
+  // 密码明文切换
+  var eyeOpen = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 10C2 10 5 4.8 10 4.8S18 10 18 10s-3 5.2-8 5.2S2 10 2 10Z" stroke="#98A2B3" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="#98A2B3" stroke-width="1.4"/></svg>';
+  var eyeOff  = '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 10C2 10 5 4.8 10 4.8S18 10 18 10s-3 5.2-8 5.2S2 10 2 10Z" stroke="#98A2B3" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.4" stroke="#98A2B3" stroke-width="1.4"/><path d="M3.5 3.5 16.5 16.5" stroke="#98A2B3" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
+  eyeBtn.addEventListener('mousedown', function(e){ e.preventDefault(); });
+  eyeBtn.addEventListener('click', function(){
+    var toText = password.type === 'password';
+    password.type = toText ? 'text' : 'password';
+    eyeBtn.innerHTML = toText ? eyeOff : eyeOpen;
+    eyeBtn.setAttribute('aria-label', toText ? '隐藏密码' : '显示密码');
+    syncState();
+  });
+
+  /* ==========================================================
+     四、提交：校验 → 加载 → 结果
+     ========================================================== */
+  function showAlert(kind, text, field){
+    alertBox.className = 'alert alert--' + kind;
+    alertText.textContent = text;
+    alertBox.hidden = false;
+    if (field) field.classList.add('is-error');
+  }
+  function clearAlert(){
+    alertBox.hidden = true;
+    accountWrap.classList.remove('is-error');
+    passwordWrap.classList.remove('is-error');
+  }
+  function resetButton(){
+    submitBtn.classList.remove('is-loading', 'is-done');
+    submitBtn.disabled = false;
+  }
+
+  function validate(){
+    var acc = account.value.trim();
+    var pwd = password.value;
+
+    if (!acc){
+      return {msg: role === 'candidate' ? '请输入手机号' : '请输入企业账号', wrap: accountWrap};
+    }
+    if (role === 'candidate' && !/^1[3-9]\d{9}$/.test(acc)){
+      return {msg:'请输入正确的 11 位手机号', wrap: accountWrap};
+    }
+    if (pwd.length < 6){
+      return {msg:'密码至少 6 位', wrap: passwordWrap};
+    }
+    return null;
+  }
+
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    clearAlert();
+
+    var err = validate();
+    if (err){
+      showAlert('error', err.msg, err.wrap);
+      // 硬拦截后聚焦到出错字段
+      (err.wrap === accountWrap ? account : password).focus();
+      return;
+    }
+
+    submitBtn.classList.add('is-loading');
+    submitBtn.disabled = true;
+
+    setTimeout(function(){
+      submitBtn.classList.remove('is-loading');
+      submitBtn.classList.add('is-done');
+      // 演示态：真实项目此处跳转到工作台 / 我的投递
+      showAlert('ok', role === 'candidate' ? '登录成功，正在进入「我的投递」…' : '登录成功，正在进入招聘工作台…');
+      setTimeout(resetButton, 2200);
+    }, 1300);
+  });
+
+  /* ==========================================================
+     五、初始化
+     ========================================================== */
+  renderRole('candidate');
+  account.value = '';
+  password.value = '';
+  measure();
+  renderStage();     // 首屏保持直立 idle 姿态（与参照稿一致：不自动聚焦输入框）
+})();
+</script>
+</body>
+</html>
