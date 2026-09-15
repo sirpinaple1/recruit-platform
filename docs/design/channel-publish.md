@@ -257,7 +257,7 @@ extension/
 | T3.1 | `channel` 表 + CRUD | 纯数据插 mock_demo 渠道，不改代码 | ✅ 已完成（2026-09-15，建表+种子 SQL、`/api/channels` 增改查；curl 验收 9 项通过：列表/创建/重复 code 409/非法 JSON 400/非法 capability 400/编辑/code 不可改/未登录 401/数据清理） |
 | T3.2 | `publish_draft` 渲染（白名单+深链实例化） | approve 后每启用渠道各一条草稿，内容正确 | ✅ 已完成（2026-09-15，`GET /api/hr-requests/{id}/drafts`；approve/close/auto_close 事务挂接；curl 验收 8 项通过：渲染白名单∩渠道声明、salaryText 派生 15-25K、深链 {requestNo} 实例化、disabled 渠道排除、close/招满自动取消、reopen 重渲染幂等、未登录 401） |
 | T3.4 | recruit-web 管理端页面原型对齐（AppShell / 工作台 / 职位列表与详情 / 渠道管理页） | Chrome 端到端全链路 | ✅ 已完成（2026-09-15，AppShell 侧栏+顶栏对齐原型 s1-s9 设计令牌；工作台统计卡/待审批/在招职位重做；详情页状态机操作+渠道草稿展示（待发布/已取消 chip、复制深链）+候选人管线占位；渠道管理页列表+新建/编辑抽屉（code 不可改、JSON 前置校验）；vue-tsc 通过，Chrome 端到端验证 10 项通过、console 零错误） |
-| T3.3 | `extension_token` + `publish_record` + 回填 API | 拉草稿→回填→台账可查；吊销后 401 | 待开发 |
+| T3.3 | `extension_token` + `publish_record` + 回填 API | 拉草稿→回填→台账可查；吊销后 401 | ✅ 已完成（2026-09-15，`/api/extension-tokens` 生成/列表/吊销 + `/api/publish-records` 分页筛选 + `/api/ext/drafts`、`/api/ext/records/{id}/report`（X-Extension-Token 独立鉴权，SHA-256 hash 落库、明文仅创建响应一次）；approve 事务内草稿+台账一对一同步创建，close/auto_close/重渲染联动 pending 台账置 failed（行保留审计），回填终结 published/failed 同时草稿置 consumed、防重复回填；curl 验收 20 项通过：token 生命周期/无 token·假 token·吊销后 401/last_used_at 刷新/台账同步/回填 published·failed/重复回填 400/非法 status 400/close·重渲染联动/分页筛选/明文不落库） |
 | T4.1 | MV3 骨架 + options | chrome://extensions 加载，配置持久 | 待开发 |
 | T4.2 | fixtures/publish-mock.html | 15+ 字段结构完整（input/select/radio/textarea） | 待开发 |
 | T4.3 | 填充引擎三级匹配 | mock 页 15+ 字段全命中 | 待开发 |

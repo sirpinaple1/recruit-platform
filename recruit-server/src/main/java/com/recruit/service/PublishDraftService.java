@@ -42,15 +42,17 @@ public class PublishDraftService {
 
     private final PublishDraftMapper publishDraftMapper;
     private final ChannelMapper channelMapper;
+    private final PublishRecordService publishRecordService;
 
     /**
-     * 需求审批通过：为每个 enabled 且 capability=manual 的渠道渲染一条 pending 草稿。
-     * 先把该需求存量 pending 置 cancelled（重渲染规则：同一 (request, channel) 只一条 pending，
-     * reopen 后二次 approve 幂等）。
+     * 需求审批通过：为每个 enabled 且 capability=manual 的渠道渲染一条 pending 草稿 + pending 台账。
+     * 先把该需求存量 pending 置 cancelled、未回填台账置 failed（重渲染规则：
+     * 同一 (request, channel) 只一条 pending，reopen 后二次 approve 幂等）。
      */
     @Transactional(rollbackFor = Exception.class)
     public void renderForRequest(HrRequest request) {
         cancelPendingByRequest(request.getId());
+        publishRecordService.failPendingByRequest(request.getId(), "需求重新审批，草稿重渲染，未回填台账作废");
         List<Channel> channels = channelMapper.selectList(new LambdaQueryWrapper<Channel>()
                 .eq(Channel::getStatus, "enabled")
                 .eq(Channel::getCapability, "manual")
@@ -64,6 +66,8 @@ public class PublishDraftService {
             draft.setDeepLink(instantiateDeepLink(channel.getDeepLinkTemplate(), request));
             draft.setStatus("pending");
             publishDraftMapper.insert(draft);
+            // 一对一台账：与草稿同事务创建（§5.4）
+            publishRecordService.createPendingFor(draft);
         }
         log.info("需求 {} 审批通过，渲染渠道草稿 {} 条", request.getRequestNo(), channels.size());
     }

@@ -54,6 +54,7 @@ public class HrRequestService {
 
     private final HrRequestMapper hrRequestMapper;
     private final PublishDraftService publishDraftService;
+    private final PublishRecordService publishRecordService;
 
     // ==================== CRUD ====================
 
@@ -120,7 +121,7 @@ public class HrRequestService {
         entity.setStatus(target);
         entity.setOpenedAt(LocalDateTime.now(ZoneOffset.UTC));
         hrRequestMapper.updateById(entity);
-        // 渲染 publish_draft(pending)；台账 publish_record 在 T3.3 挂接
+        // 事务内渲染 publish_draft(pending) + publish_record(pending)（§5.3/§5.4）
         publishDraftService.renderForRequest(entity);
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
@@ -147,7 +148,9 @@ public class HrRequestService {
         entity.setCloseReason(closeReason);
         entity.setClosedAt(LocalDateTime.now(ZoneOffset.UTC));
         hrRequestMapper.updateById(entity);
+        // 未消费草稿置 cancelled；未回填台账置 failed（行保留审计，§5.4）
         publishDraftService.cancelPendingByRequest(id);
+        publishRecordService.failPendingByRequest(id, "需求关闭（" + closeReason + "），未发布草稿作废");
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
@@ -177,6 +180,7 @@ public class HrRequestService {
             entity.setClosedAt(LocalDateTime.now(ZoneOffset.UTC));
             hrRequestMapper.updateById(entity);
             publishDraftService.cancelPendingByRequest(id);
+            publishRecordService.failPendingByRequest(id, "招满自动关闭（filled），未发布草稿作废");
         } else {
             hrRequestMapper.updateById(entity);
         }
