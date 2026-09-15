@@ -9,7 +9,7 @@ services:
       MYSQL_DATABASE: recruit_platform
       TZ: Asia/Shanghai
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - ./docker/mysql/data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d
@@ -26,7 +26,7 @@ services:
     image: redis:7-alpine
     container_name: recruit-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - ./docker/redis/data:/data
     command: redis-server --appendonly yes --requirepass recruit2024

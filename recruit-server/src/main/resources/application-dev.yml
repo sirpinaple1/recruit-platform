@@ -1,15 +1,15 @@
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/recruit?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC
+    url: jdbc:mysql://127.0.0.1:3307/recruit_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&connectionTimeZone=UTC
     username: ${MYSQL_USERNAME:root}
-    password: ${MYSQL_PASSWORD:}
+    password: ${MYSQL_PASSWORD:recruit2024}
   data:
     redis:
       host: 127.0.0.1
-      port: 6379
+      port: 6380
       database: 0
-      password: ${REDIS_PASSWORD:}
+      password: ${REDIS_PASSWORD:recruit2024}
       timeout: 3s
 
 logging:
