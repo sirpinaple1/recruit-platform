@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
 @Builder
 public class HrRequestVO {
 
-    private Long id;
+    /** 雪花 ID：超 JS 安全整数范围，用 String 传输防前端丢精度 */
+    private String id;
 
     /** 需求编号（REQ-YYYYMMDD-XXXX） */
     private String requestNo;
@@ -55,7 +56,8 @@ public class HrRequestVO {
 
     private LocalDateTime closedAt;
 
-    private Long createdBy;
+    /** 创建人 sys_user.id（同样用 String 传输） */
+    private String createdBy;
 
     private LocalDateTime createdAt;
 
@@ -63,7 +65,7 @@ public class HrRequestVO {
 
     public static HrRequestVO from(HrRequest e) {
         return HrRequestVO.builder()
-                .id(e.getId())
+                .id(e.getId() == null ? null : String.valueOf(e.getId()))
                 .requestNo(e.getRequestNo())
                 .title(e.getTitle())
                 .deptName(e.getDeptName())
@@ -83,7 +85,7 @@ public class HrRequestVO {
                 .rejectReason(e.getRejectReason())
                 .openedAt(e.getOpenedAt())
                 .closedAt(e.getClosedAt())
-                .createdBy(e.getCreatedBy())
+                .createdBy(e.getCreatedBy() == null ? null : String.valueOf(e.getCreatedBy()))
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
                 .build();

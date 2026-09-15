@@ -1,6 +1,7 @@
 package com.recruit.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.recruit.common.MyException;
@@ -15,12 +16,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * 人力需求单 CRUD
+ * 人力需求单 CRUD 与状态机
  */
 @Log4j2
 @RequiredArgsConstructor
@@ -30,10 +33,27 @@ public class HrRequestService {
     /** 用工性质合法值 */
     private static final Set<String> EMPLOYMENT_TYPES = Set.of("full_time", "part_time", "internship", "contract");
 
+    /** 关闭原因合法值 */
+    private static final Set<String> CLOSE_REASONS = Set.of("filled", "cancelled", "frozen");
+
     /** 编号取号冲突重试次数 */
     private static final int REQUEST_NO_RETRY = 3;
 
+    /**
+     * 状态转移表：action:当前状态 -> 目标状态。
+     * 不在表内的组合即非法转移（抛 4xx），见 docs/design/channel-publish.md §5.1。
+     */
+    private static final Map<String, String> TRANSFERS = Map.of(
+            "submit:draft", "pending_approval",
+            "approve:pending_approval", "open",
+            "reject:pending_approval", "draft",
+            "close:open", "closed",
+            "reopen:closed", "draft"
+    );
+
     private final HrRequestMapper hrRequestMapper;
+
+    // ==================== CRUD ====================
 
     /** 建单（status 固定 draft，编号服务端生成） */
     public HrRequestVO create(HrRequestSaveDTO dto, Long userId) {
@@ -63,7 +83,7 @@ public class HrRequestService {
         return HrRequestVO.from(requireById(id));
     }
 
-    /** 编辑（仅 draft 可编辑，状态流转见 T2.2） */
+    /** 编辑（仅 draft 可编辑） */
     public HrRequestVO update(Long id, HrRequestSaveDTO dto) {
         validate(dto);
         HrRequest entity = requireById(id);
@@ -76,6 +96,101 @@ public class HrRequestService {
         }
         hrRequestMapper.updateById(entity);
         return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    // ==================== 状态机 ====================
+
+    /** 提交审批：draft -> pending_approval（提交前校验必填完整性） */
+    public HrRequestVO submit(Long id) {
+        HrRequest entity = requireById(id);
+        String target = checkTransfer(entity, "submit");
+        checkSubmittable(entity);
+        entity.setStatus(target);
+        hrRequestMapper.updateById(entity);
+        return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    /** 审批通过：pending_approval -> open，写 opened_at */
+    public HrRequestVO approve(Long id) {
+        HrRequest entity = requireById(id);
+        String target = checkTransfer(entity, "approve");
+        entity.setStatus(target);
+        entity.setOpenedAt(LocalDateTime.now(ZoneOffset.UTC));
+        // TODO(T3.2): 事务内对每个 enabled 且 capability=manual 的渠道生成 publish_draft(pending) + publish_record(pending)
+        hrRequestMapper.updateById(entity);
+        return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    /** 驳回：pending_approval -> draft，记录驳回原因 */
+    public HrRequestVO reject(Long id, String rejectReason) {
+        HrRequest entity = requireById(id);
+        String target = checkTransfer(entity, "reject");
+        entity.setStatus(target);
+        entity.setRejectReason(rejectReason);
+        hrRequestMapper.updateById(entity);
+        return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    /** 关闭：open -> closed，写 closed_at + close_reason */
+    public HrRequestVO close(Long id, String closeReason) {
+        if (!CLOSE_REASONS.contains(closeReason)) {
+            throw new MyException(400, "关闭原因必须是 filled/cancelled/frozen");
+        }
+        HrRequest entity = requireById(id);
+        String target = checkTransfer(entity, "close");
+        entity.setStatus(target);
+        entity.setCloseReason(closeReason);
+        entity.setClosedAt(LocalDateTime.now(ZoneOffset.UTC));
+        // TODO(T3.2): 未消费草稿置 cancelled
+        hrRequestMapper.updateById(entity);
+        return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    /** 重新打开：closed -> draft，清空关闭痕迹 */
+    public HrRequestVO reopen(Long id) {
+        HrRequest entity = requireById(id);
+        checkTransfer(entity, "reopen");
+        // close_reason / closed_at 要显式置 null（updateById 默认忽略 null 字段）
+        hrRequestMapper.update(null, new LambdaUpdateWrapper<HrRequest>()
+                .eq(HrRequest::getId, id)
+                .set(HrRequest::getStatus, "draft")
+                .set(HrRequest::getCloseReason, null)
+                .set(HrRequest::getClosedAt, null));
+        return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    /** 手动修正已入职数：open 状态下 filled >= total 且 auto_close 开启 -> 自动关闭（filled） */
+    public HrRequestVO updateHeadcount(Long id, Integer headcountFilled) {
+        HrRequest entity = requireById(id);
+        entity.setHeadcountFilled(headcountFilled);
+        if ("open".equals(entity.getStatus())
+                && Boolean.TRUE.equals(entity.getAutoClose())
+                && headcountFilled >= entity.getHeadcountTotal()) {
+            entity.setStatus("closed");
+            entity.setCloseReason("filled");
+            entity.setClosedAt(LocalDateTime.now(ZoneOffset.UTC));
+        }
+        hrRequestMapper.updateById(entity);
+        return HrRequestVO.from(hrRequestMapper.selectById(id));
+    }
+
+    // ==================== 内部方法 ====================
+
+    /** 校验转移合法性：非法组合抛 4xx，合法返回目标状态 */
+    private String checkTransfer(HrRequest entity, String action) {
+        String target = TRANSFERS.get(action + ":" + entity.getStatus());
+        if (target == null) {
+            throw new MyException(400, "非法状态转移：" + action + " 不允许在 " + entity.getStatus() + " 状态执行");
+        }
+        return target;
+    }
+
+    /** 提交前必填校验（建单/编辑已保证，此处为流程兜底） */
+    private void checkSubmittable(HrRequest entity) {
+        if (!StringUtils.hasText(entity.getTitle()) || !StringUtils.hasText(entity.getDeptName())
+                || entity.getHeadcountTotal() == null || !StringUtils.hasText(entity.getJobDescription())) {
+            throw new MyException(400, "提交前请完善岗位名称/用人部门/计划招聘人数/JD正文");
+        }
     }
 
     private HrRequest requireById(Long id) {
