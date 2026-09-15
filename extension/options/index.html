@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>招聘发布助手 · 配置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="card">
+    <h1>招聘发布助手</h1>
+    <p class="sub">渠道发布中台浏览器扩展 · 配置</p>
+
+    <form id="config-form">
+      <label for="base-url">后端地址</label>
+      <input id="base-url" type="url" placeholder="http://localhost:6017" spellcheck="false" required>
+
+      <label for="ext-token">扩展授权 Token</label>
+      <input id="ext-token" type="password" placeholder="粘贴管理端「扩展授权」生成的 token" spellcheck="false" autocomplete="off">
+
+      <div class="actions">
+        <button type="submit" class="primary">保存</button>
+        <button type="button" id="btn-test">测试连接</button>
+      </div>
+    </form>
+
+    <div id="status" class="status" hidden></div>
+
+    <section class="note">
+      <p class="note-title">说明</p>
+      <ul>
+        <li>后端地址持久保存，重启浏览器后仍生效。</li>
+        <li>Token 仅保存在当前浏览器会话（<strong>关闭浏览器后自动清除，需重新粘贴</strong>）——不落盘、安全优先，有意为之。</li>
+        <li>Token 在管理端「扩展授权」页生成，仅在创建时展示一次，请立即粘贴保存。</li>
+      </ul>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
