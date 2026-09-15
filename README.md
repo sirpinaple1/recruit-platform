@@ -161,7 +161,9 @@ cd recruit-web && npm install && npm run dev
 - ✅ T0 开发环境就绪（Docker 五件套 + Ollama 模型 + 初始化数据）
 - ✅ T1 后端基础：统一响应/全局异常/健康检查、登录与 JWT 会话（BCrypt + 拦截器）
 - ✅ T1.4 前端工程已搭建并接通登录：httpClient（Zod 校验 + Bearer 注入）、路由守卫、登录页（原型完整还原，双角色）、工作台占位页
-- 🚧 T2.x 需求单（hr_request）CRUD 与状态机：待开发
+- ✅ T2.1 hr_request 建表 SQL + CRUD（REQ-YYYYMMDD-XXXX 编号、draft 状态编辑守卫、雪花 ID 字符串序列化）
+- ✅ T2.2 需求单状态机：submit/approve/reject/close/reopen/headcount 六个转移接口（转移表守卫、招满自动关闭），curl 14 项验收通过
+- ✅ T2 前端页面：需求单列表 / 新建编辑抽屉 / 详情状态操作弹窗 + 路由与工作台入口，Chrome 浏览器端到端全链路验证通过（登录→建单→审批→自动关闭→重开→驳回）
 - 🚧 T3.x 渠道/草稿/台账/扩展授权：待开发
 - 🚧 T4.x Chrome 扩展（MV3 填充引擎）：待开发
 - 🚧 AI 服务工程待搭建

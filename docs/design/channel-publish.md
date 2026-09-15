@@ -252,8 +252,8 @@ extension/
 
 | 单元 | 内容 | 验证 | 状态 |
 |---|---|---|---|
-| T2.1 | `hr_request` 建表 SQL + CRUD | curl 建单/查单 | 待开发 |
-| T2.2 | 状态机（转移表+非法转移 4xx） | 非法转移被拒，合法转移落库 | 待开发 |
+| T2.1 | `hr_request` 建表 SQL + CRUD | curl 建单/查单 | ✅ 已完成（2026-09-15） |
+| T2.2 | 状态机（转移表+非法转移 4xx） | 非法转移被拒，合法转移落库 | ✅ 已完成（2026-09-15，含 recruit-web 需求单列表/表单/详情页 + Chrome 端到端验证全链路通过） |
 | T3.1 | `channel` 表 + CRUD | 纯数据插 mock_demo 渠道，不改代码 | 待开发 |
 | T3.2 | `publish_draft` 渲染（白名单+深链实例化） | approve 后每启用渠道各一条草稿，内容正确 | 待开发 |
 | T3.3 | `extension_token` + `publish_record` + 回填 API | 拉草稿→回填→台账可查；吊销后 401 | 待开发 |
