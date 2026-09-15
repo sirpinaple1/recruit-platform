@@ -2,10 +2,10 @@
 <!--
     Log4j2 配置。文件名用 log4j2-spring.xml，Spring Boot 会优先加载它。
     日志目录可通过 -DLOG_HOME=/path/to/logs 覆盖，默认落盘到应用工作目录下的 logs/。
+    注意：LOG_HOME 直接在各处用 ${sys:LOG_HOME:-logs} 内联查找，避免同名属性自引用死循环。
 -->
 <Configuration status="WARN">
     <Properties>
-        <Property name="LOG_HOME">${sys:LOG_HOME:-logs}</Property>
         <Property name="APP_NAME">recruit-server</Property>
         <Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</Property>
     </Properties>
@@ -16,8 +16,8 @@
         </Console>
 
         <RollingFile name="RollingFile"
-                     fileName="${LOG_HOME}/${APP_NAME}.log"
-                     filePattern="${LOG_HOME}/${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
+                     fileName="${sys:LOG_HOME:-logs}/${APP_NAME}.log"
+                     filePattern="${sys:LOG_HOME:-logs}/${APP_NAME}-%d{yyyy-MM-dd}-%i.log.gz">
             <PatternLayout pattern="${LOG_PATTERN}"/>
             <Policies>
                 <TimeBasedTriggeringPolicy/>
