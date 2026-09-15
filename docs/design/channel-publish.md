@@ -254,8 +254,8 @@ extension/
 |---|---|---|---|
 | T2.1 | `hr_request` 建表 SQL + CRUD | curl 建单/查单 | ✅ 已完成（2026-09-15） |
 | T2.2 | 状态机（转移表+非法转移 4xx） | 非法转移被拒，合法转移落库 | ✅ 已完成（2026-09-15，含 recruit-web 需求单列表/表单/详情页 + Chrome 端到端验证全链路通过） |
-| T3.1 | `channel` 表 + CRUD | 纯数据插 mock_demo 渠道，不改代码 | 待开发 |
-| T3.2 | `publish_draft` 渲染（白名单+深链实例化） | approve 后每启用渠道各一条草稿，内容正确 | 待开发 |
+| T3.1 | `channel` 表 + CRUD | 纯数据插 mock_demo 渠道，不改代码 | ✅ 已完成（2026-09-15，建表+种子 SQL、`/api/channels` 增改查；curl 验收 9 项通过：列表/创建/重复 code 409/非法 JSON 400/非法 capability 400/编辑/code 不可改/未登录 401/数据清理） |
+| T3.2 | `publish_draft` 渲染（白名单+深链实例化） | approve 后每启用渠道各一条草稿，内容正确 | ✅ 已完成（2026-09-15，`GET /api/hr-requests/{id}/drafts`；approve/close/auto_close 事务挂接；curl 验收 8 项通过：渲染白名单∩渠道声明、salaryText 派生 15-25K、深链 {requestNo} 实例化、disabled 渠道排除、close/招满自动取消、reopen 重渲染幂等、未登录 401） |
 | T3.3 | `extension_token` + `publish_record` + 回填 API | 拉草稿→回填→台账可查；吊销后 401 | 待开发 |
 | T4.1 | MV3 骨架 + options | chrome://extensions 加载，配置持久 | 待开发 |
 | T4.2 | fixtures/publish-mock.html | 15+ 字段结构完整（input/select/radio/textarea） | 待开发 |

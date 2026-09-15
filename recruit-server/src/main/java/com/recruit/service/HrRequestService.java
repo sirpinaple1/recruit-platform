@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
@@ -52,6 +53,7 @@ public class HrRequestService {
     );
 
     private final HrRequestMapper hrRequestMapper;
+    private final PublishDraftService publishDraftService;
 
     // ==================== CRUD ====================
 
@@ -110,14 +112,16 @@ public class HrRequestService {
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
-    /** 审批通过：pending_approval -> open，写 opened_at */
+    /** 审批通过：pending_approval -> open，写 opened_at，事务内为每个启用渠道渲染发布草稿 */
+    @Transactional(rollbackFor = Exception.class)
     public HrRequestVO approve(Long id) {
         HrRequest entity = requireById(id);
         String target = checkTransfer(entity, "approve");
         entity.setStatus(target);
         entity.setOpenedAt(LocalDateTime.now(ZoneOffset.UTC));
-        // TODO(T3.2): 事务内对每个 enabled 且 capability=manual 的渠道生成 publish_draft(pending) + publish_record(pending)
         hrRequestMapper.updateById(entity);
+        // 渲染 publish_draft(pending)；台账 publish_record 在 T3.3 挂接
+        publishDraftService.renderForRequest(entity);
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
@@ -131,7 +135,8 @@ public class HrRequestService {
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
-    /** 关闭：open -> closed，写 closed_at + close_reason */
+    /** 关闭：open -> closed，写 closed_at + close_reason，未消费草稿置 cancelled */
+    @Transactional(rollbackFor = Exception.class)
     public HrRequestVO close(Long id, String closeReason) {
         if (!CLOSE_REASONS.contains(closeReason)) {
             throw new MyException(400, "关闭原因必须是 filled/cancelled/frozen");
@@ -141,8 +146,8 @@ public class HrRequestService {
         entity.setStatus(target);
         entity.setCloseReason(closeReason);
         entity.setClosedAt(LocalDateTime.now(ZoneOffset.UTC));
-        // TODO(T3.2): 未消费草稿置 cancelled
         hrRequestMapper.updateById(entity);
+        publishDraftService.cancelPendingByRequest(id);
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
@@ -159,7 +164,8 @@ public class HrRequestService {
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
-    /** 手动修正已入职数：open 状态下 filled >= total 且 auto_close 开启 -> 自动关闭（filled） */
+    /** 手动修正已入职数：open 状态下 filled >= total 且 auto_close 开启 -> 自动关闭（filled，未消费草稿置 cancelled） */
+    @Transactional(rollbackFor = Exception.class)
     public HrRequestVO updateHeadcount(Long id, Integer headcountFilled) {
         HrRequest entity = requireById(id);
         entity.setHeadcountFilled(headcountFilled);
@@ -169,8 +175,11 @@ public class HrRequestService {
             entity.setStatus("closed");
             entity.setCloseReason("filled");
             entity.setClosedAt(LocalDateTime.now(ZoneOffset.UTC));
+            hrRequestMapper.updateById(entity);
+            publishDraftService.cancelPendingByRequest(id);
+        } else {
+            hrRequestMapper.updateById(entity);
         }
-        hrRequestMapper.updateById(entity);
         return HrRequestVO.from(hrRequestMapper.selectById(id));
     }
 
