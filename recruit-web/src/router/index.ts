@@ -21,6 +21,16 @@ const router = createRouter({
       component: () => import('@/pages/hr-requests/HrRequestListPage.vue'),
     },
     {
+      path: '/hr-requests/:id',
+      name: 'hr-request-detail',
+      component: () => import('@/pages/hr-requests/HrRequestDetailPage.vue'),
+    },
+    {
+      path: '/channels',
+      name: 'channels',
+      component: () => import('@/pages/channels/ChannelListPage.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/',
     },
