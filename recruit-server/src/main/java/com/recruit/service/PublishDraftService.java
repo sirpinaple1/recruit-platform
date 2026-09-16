@@ -38,7 +38,8 @@ public class PublishDraftService {
     private static final Set<String> RENDER_WHITELIST = Set.of(
             "title", "jobDescription", "jobRequirement", "location",
             "salaryMin", "salaryMax", "salaryText",
-            "education", "experienceYears", "employmentType");
+            "education", "experienceYears", "employmentType",
+            "deptName", "headcountTotal", "requestNo", "publishDate");
 
     private final PublishDraftMapper publishDraftMapper;
     private final ChannelMapper channelMapper;
@@ -131,8 +132,17 @@ public class PublishDraftService {
             case "education" -> r.getEducation();
             case "experienceYears" -> r.getExperienceYears();
             case "employmentType" -> r.getEmploymentType();
+            case "deptName" -> r.getDeptName();
+            case "headcountTotal" -> r.getHeadcountTotal();
+            case "requestNo" -> r.getRequestNo();
+            case "publishDate" -> publishDate(r);
             default -> null;
         };
+    }
+
+    /** 发布日期（需求创建日期，date 控件格式 yyyy-MM-dd） */
+    private String publishDate(HrRequest r) {
+        return r.getCreatedAt() == null ? null : r.getCreatedAt().toLocalDate().toString();
     }
 
     /** 薪资文本（元 -> 千元展示）：双值 15-25K，仅下限 15K起，仅上限 25K以内 */
