@@ -6,9 +6,7 @@ import { fetchMe } from '@/lib/api/auth.api';
 import { fetchHrRequestPage } from '@/lib/api/hr-request.api';
 import { ApiError } from '@/lib/httpClient';
 import AppShell from '@/components/layout/AppShell.vue';
-import { useAuthStore } from '@/stores/auth';
-import { STATUS_LABELS, type HrRequestVO } from '@/types/hr-request.types';
-import { STATUS_CHIP_CLASS } from './hr-requests/hr-request-ui';
+import { type HrRequestVO } from '@/types/hr-request.types';
 
 /**
  * 工作台（对齐原型 s1-workbench）：状态统计卡 + 待我审批 + 招聘中职位进度。
@@ -16,7 +14,6 @@ import { STATUS_CHIP_CLASS } from './hr-requests/hr-request-ui';
  */
 
 const router = useRouter();
-const authStore = useAuthStore();
 
 const all = ref<HrRequestVO[]>([]);
 const pendingApproval = ref<HrRequestVO[]>([]);
