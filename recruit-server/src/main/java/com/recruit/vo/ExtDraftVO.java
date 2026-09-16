@@ -35,6 +35,9 @@ public class ExtDraftVO {
     /** 按渠道映射渲染好的字段值（JSON 对象） */
     private JSONObject fieldsJson;
 
+    /** 渠道字段映射（fields + selectors，popup 合成填充引擎 config 用） */
+    private JSONObject fieldMapJson;
+
     /** 实例化深链 */
     private String deepLink;
 
@@ -48,6 +51,7 @@ public class ExtDraftVO {
                 .channelName(channel == null ? null : channel.getName())
                 .publishUrlPattern(channel == null ? null : channel.getPublishUrlPattern())
                 .fieldsJson(d.getFieldsJson() == null ? null : JSONObject.parseObject(d.getFieldsJson()))
+                .fieldMapJson(channel == null || channel.getFieldMapJson() == null ? null : JSONObject.parseObject(channel.getFieldMapJson()))
                 .deepLink(d.getDeepLink())
                 .build();
     }

@@ -3,13 +3,21 @@
   "name": "招聘发布助手",
   "version": "0.1.0",
   "description": "渠道发布中台浏览器扩展：拉取待发布草稿、一键填充发布页、回填发布结果",
-  "permissions": ["storage", "scripting", "activeTab"],
-  "host_permissions": ["http://localhost:6017/*"],
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://localhost:6017/*",
+    "http://localhost:8430/*"
+  ],
   "options_ui": {
     "page": "options/index.html",
     "open_in_tab": true
   },
   "action": {
-    "default_title": "招聘发布助手"
+    "default_title": "招聘发布助手",
+    "default_popup": "popup/popup.html"
   }
 }

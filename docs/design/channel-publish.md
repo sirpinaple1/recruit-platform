@@ -202,12 +202,12 @@ headcount：filled >= total 且 auto_close=1 → 自动 close(filled)（filled �
 extension/
 ├── manifest.json          # MV3；permissions: storage/scripting/activeTab
 ├── options/index.html     # 后端地址 + 授权 token 配置
-├── popup/index.html       # 草稿列表 → 一键填充 → 标记已发布/失败
+├── popup/popup.html       # 草稿列表 → 一键填充 → 标记已发布/失败
 ├── content/fill-engine.js # 填充引擎（动态注入，chrome.scripting.executeScript）
 └── fixtures/publish-mock.html  # 本地模拟发布页（15+ 字段，结构与真实平台对齐）
 ```
 
-- **manifest 最小权限**：`permissions: ["storage", "scripting", "activeTab"]`；`host_permissions` 只配后端域名（dev：`http://localhost:6017/*`；生产域名上线时追加）。不声明 `<all_urls>`；
+- **manifest 最小权限**：`permissions: ["storage", "scripting", "activeTab"]`；`host_permissions` 只配后端域名（dev：`http://localhost:6017/*`；生产域名上线时追加）与 dev 联调本地 mock 页源 `http://localhost:8430/*`（`python3 -m http.server 8430 --directory extension/fixtures` 启动，模拟平台 http 页；file:// 注入受「允许访问文件网址」开关限制故不用）。不声明 `<all_urls>`；
 - **token 存储**：`chrome.storage.session`（浏览器会话级，不落 localStorage 明文；代价是重启浏览器需重贴 token——安全优先，有意为之）；
 - **content script 动态注入**：popup 点「填充」时对当前活动 tab `executeScript` 注入引擎，不做常驻 `content_scripts` 全站注入；
 - **注入判定**：popup 根据草稿的 `channel.publish_url_pattern` 校验当前 tab URL（fixtures mock 页在 dev 模式放行）；
@@ -261,7 +261,7 @@ extension/
 | T4.1 | MV3 骨架 + options | chrome://extensions 加载，配置持久 | ✅ 已完成（2026-09-15，manifest 最小权限 storage/scripting/activeTab + host_permissions 仅 localhost:6017；options 页后端地址存 chrome.storage.local（持久）、token 存 chrome.storage.session（重启自动清除，有意为之）+ 测试连接（真 token 200/假 token 401）；无头 Chrome for Testing 验收 7 项通过：页面加载/保存归一化/local·session 分离写入/reload 回显/连通性（host_permissions 豁免 CORS，后端零改动）/401 语义/重启后 local 持久+session 清空。注：正式版 Chrome 136+ 已禁用 --load-extension，自动化验收使用 Chrome for Testing 155） |
 | T4.2 | fixtures/publish-mock.html | 15+ 字段结构完整（input/select/radio/textarea） | ✅ 已完成（2026-09-16，渲染白名单扩至 14 字段：+deptName/headcountTotal/requestNo/publishDate（createdAt 派生）；mock_demo 渠道 field_map 更新 14 字段映射；mock 页 21 个交互字段：text×6/number×4/date×1/email×1/file×1/radio×4/textarea×2/select×2 + 验证码 + 提交，三级匹配线索全覆盖（selector/label/placeholder/aria-label/data-*/legend+radio）；无头 CFT 验收：结构/无 disabled/线索就位全过，approve 渲染 fields_json 14 key 全输出（salaryText 派生 20-35K） |
 | T4.3 | 填充引擎三级匹配 | mock 页 15+ 字段全命中 | ✅ 已完成（2026-09-16，content/fill-engine.js：归一化（小写/全角→半角/去空白/去冒号星号）后三级匹配 text→attr→selector（attr 级比对 match∪{key}，radio 组以 legend 为线索作整体单元）；input/textarea 赋值+派发 input/change 双事件（框架受控组件）、select 按值或文本（相等优先）、radio 按值；红线：UNSAFE_TYPES（file/submit/button/reset/image/hidden/password）与验证码启发式（name/id/placeholder/aria-label/class 含 captcha/验证码/vcode 等特征词）一律 skipped，引擎只赋值永不点击；报告 filled/skipped/failed 三分类+method 标注；预留 __RECRUIT_FILL_CONFIG__ 自动执行模式（T4.4 popup 两步注入）；无头 CFT 验收 42 项通过：14 字段全命中（label/name/placeholder/aria-label 线索路径全覆盖）、attr 级（移除 label 后 data-field 命中）、selector 级（移除全部文本线索后兜底命中）、file/验证码/提交按钮/未映射字段（职位类别/邮箱）一律不碰、页面零导航） |
-| T4.4 | popup 全链路 | 草稿→填充→回填→台账闭环 | 待开发 |
+| T4.4 | popup 全链路 | 草稿→填充→回填→台账闭环 | ✅ 已完成（2026-09-16，popup/popup 三件套：拉草稿列表（渠道 chip/职位名/需求编号）→「去发布页填充」（精确 pattern 直接 tabs.create 并等加载完成、通配 pattern 复用匹配活动页）→ 两步注入（先放 `__RECRUIT_FILL_CONFIG__` 再注入引擎自动执行）→ 报告展示 filled/skipped/failed → 「标记已发布/失败」inline 表单（发布链接/账号标识/失败原因）→ POST /api/ext/records/{recordId}/report 回填 → 列表自动刷新；401/未配置均引导配置页；后端 ExtDraftVO 补 fieldMapJson（popup 合成填充 config 用）；mock 页改本地 http 服务提供（8430）；无头 CFT 验收 35 项通过：列表渲染/两步注入 14 字段全命中（含 education 按值=bachelor、radio=full_time）/红线四类不碰/回填 published 落库（url+accountLabel+operated_by+published_at）/草稿 consumed/吊销 token 后 401 引导；DB 断言台账闭环全过） |
 
 **MVP 验收脚本**：
 

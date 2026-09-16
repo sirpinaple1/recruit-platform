@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <span class="brand">招聘发布助手</span>
+    <span id="conn" class="conn" hidden></span>
+    <button id="btn-settings" class="ghost" title="打开配置页">设置</button>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="list" class="list"></main>
+
+  <footer class="foot">
+    <button id="btn-refresh" class="ghost">刷新</button>
+    <span class="hint">在平台页人工核对并提交，系统不会自动点击提交</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
