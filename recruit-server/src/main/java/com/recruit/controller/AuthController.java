@@ -1,9 +1,7 @@
 package com.recruit.controller;
 
-import com.recruit.common.MyException;
 import com.recruit.common.R;
 import com.recruit.dto.LoginDTO;
-import com.recruit.entity.SysUser;
 import com.recruit.service.UserService;
 import com.recruit.vo.LoginVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,16 +32,6 @@ public class AuthController {
     /** 当前登录用户信息 */
     @GetMapping("/me")
     public R<LoginVO> me(HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        SysUser user = userService.getById(userId);
-        if (user == null) {
-            throw new MyException(401, "用户不存在");
-        }
-        return R.ok(LoginVO.builder()
-                .id(user.getId())
-                .username(user.getUsername())
-                .realName(user.getRealName())
-                .role(user.getRole())
-                .build());
+        return R.ok(userService.me((Long) request.getAttribute("userId")));
     }
 }

@@ -13,12 +13,16 @@ export const LoginPayloadSchema = z.object({
 });
 export type LoginPayload = z.infer<typeof LoginPayloadSchema>;
 
+/** 角色取值单一来源（与后端 Roles 常量、sys_dict.user_role 一致） */
+export const USER_ROLES = ['ADMIN', 'HR', 'INTERVIEWER'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export const LoginVOSchema = z.object({
   /** 仅 /api/auth/login 返回；/me 显式返回 null（后端 Builder 未设值时 fastjson2 输出 null） */
   token: z.string().nullish(),
   id: z.number().int(),
   username: z.string(),
   realName: z.string(),
-  role: z.enum(['ADMIN', 'HR', 'INTERVIEWER']),
+  role: z.enum(USER_ROLES),
 });
 export type LoginVO = z.infer<typeof LoginVOSchema>;

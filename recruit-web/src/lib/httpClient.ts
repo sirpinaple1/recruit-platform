@@ -9,7 +9,7 @@ import { TOKEN_KEY, clearAuth } from '@/stores/auth';
  *
  * 后端响应约定（R<T>）有两种到达路径，需同时兼容：
  * 1. 业务错误（GlobalExceptionHandler / MyException）：HTTP 200 + body.code 为 401/403/400/500…
- * 2. 登录态拦截器拒绝（AuthInterceptor）：真 HTTP 401 + body {code:401, msg:"未登录或登录已过期"}
+ * 2. 拦截器拒绝（AuthInterceptor / RoleInterceptor）：真 HTTP 401（未登录）或 403（无权限）+ body {code, msg}
  */
 
 export class ApiError extends Error {
@@ -66,6 +66,10 @@ http.interceptors.response.use(
     if (status === 401) {
       handleUnauthorized();
       throw toApiError('未登录或登录已过期', body, 401);
+    }
+    // 403 = 已登录但无权限（RoleInterceptor / MyException）：不清登录态，透出后端提示
+    if (status === 403) {
+      throw toApiError('无权访问该功能', body, 403);
     }
     throw toApiError('网络异常，请稍后重试', body, status);
   },

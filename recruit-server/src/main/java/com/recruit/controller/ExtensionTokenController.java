@@ -1,6 +1,8 @@
 package com.recruit.controller;
 
 import com.recruit.common.R;
+import com.recruit.common.RequireRole;
+import com.recruit.common.Roles;
 import com.recruit.dto.ExtensionTokenCreateDTO;
 import com.recruit.service.ExtensionTokenService;
 import com.recruit.vo.ExtensionTokenCreatedVO;
@@ -18,10 +20,14 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 扩展授权管理（登录态，见设计文档 §6.1）：
+ * 扩展授权管理（登录态 + ADMIN 角色，见设计文档 §6.1 / ADR-001）：
  * 明文 token 仅创建响应返回一次（红线 §5.5：不落库不落日志）。
+ *
+ * <p>整类收敛到 ADMIN：扩展 token 可访问全量待发布草稿，属管理动作，
+ * 普通 HR 不得自行签发。</p>
  */
 @RequiredArgsConstructor
+@RequireRole(Roles.ADMIN)
 @RestController
 @RequestMapping("/api/extension-tokens")
 public class ExtensionTokenController {

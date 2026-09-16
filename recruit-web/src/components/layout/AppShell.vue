@@ -30,6 +30,8 @@ interface NavItem {
   label: string;
   icon: string;
   disabled?: boolean;
+  /** 仅管理员可见（对应路由 meta.role，见 ADR-001） */
+  adminOnly?: boolean;
 }
 
 /** 导航项：icon 为 16x16 viewBox 内的 SVG path 组（stroke 风格，对齐原型） */
@@ -39,10 +41,15 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { name: 'candidates', label: '候选人', icon: 'M8.8 8.2a2.4 2.4 0 1 0-4.8 0 2.4 2.4 0 0 0 4.8 0zM2.2 13.4c0-2.2 1.9-3.6 4.2-3.6s4.2 1.4 4.2 3.6M10.6 4.1a2.4 2.4 0 0 1 0 4.4M12 10c1.2.5 1.8 1.7 1.8 3.4', disabled: true },
   { name: 'interviews', label: '面试', icon: 'M2 3.5h12V14H2zM2 6.8h12M5.5 2v3M10.5 2v3', disabled: true },
   { name: 'analytics', label: '数据', icon: 'M2 13.5h12M4.2 11.4V8.6M8 11.4V5.4M11.8 11.4V9.6', disabled: true },
-  { name: 'channels', label: '渠道管理', icon: 'M2 3h12v10H2zM2 6.5h12M5 6.5v6.5' },
+  { name: 'channels', label: '渠道管理', icon: 'M2 3h12v10H2zM2 6.5h12M5 6.5v6.5', adminOnly: true },
   { name: 'publish-records', label: '发布台账', icon: 'M3 2h10v12H3zM5.5 5.5h5M5.5 8.5h5M5.5 11.5h3' },
-  { name: 'extension-tokens', label: '扩展授权', icon: 'M4 7h8v6H4zM6 7V5a2 2 0 0 1 4 0v2' },
+  { name: 'extension-tokens', label: '扩展授权', icon: 'M4 7h8v6H4zM6 7V5a2 2 0 0 1 4 0v2', adminOnly: true },
 ];
+
+/** 按当前用户角色过滤导航（后端才是授权权威，此处仅隐藏入口） */
+const visibleNavItems = computed(() =>
+  NAV_ITEMS.filter((item) => !item.adminOnly || user.value?.role === 'ADMIN'),
+);
 
 const todayText = computed(() => {
   const d = new Date();
@@ -82,7 +89,7 @@ function onUserClick(): void {
 
       <nav class="flex flex-1 flex-col gap-0.5">
         <button
-          v-for="item in NAV_ITEMS"
+          v-for="item in visibleNavItems"
           :key="item.name"
           type="button"
           class="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition"
