@@ -60,40 +60,50 @@ public class HrRequestController {
     }
 
     // ==================== 状态机 ====================
+    // 每个动作都把当前登录用户作为 operatorId 传下去：状态转移会据此写 domain_event，
+    // 事件没有操作人就失去了审计价值（P1-2）。
 
     /** 提交审批：draft -> pending_approval */
     @PostMapping("/{id}/submit")
-    public R<HrRequestVO> submit(@PathVariable Long id) {
-        return R.ok(hrRequestService.submit(id));
+    public R<HrRequestVO> submit(@PathVariable Long id, HttpServletRequest request) {
+        return R.ok(hrRequestService.submit(id, currentUserId(request)));
     }
 
     /** 审批通过：pending_approval -> open */
     @PostMapping("/{id}/approve")
-    public R<HrRequestVO> approve(@PathVariable Long id) {
-        return R.ok(hrRequestService.approve(id));
+    public R<HrRequestVO> approve(@PathVariable Long id, HttpServletRequest request) {
+        return R.ok(hrRequestService.approve(id, currentUserId(request)));
     }
 
     /** 驳回：pending_approval -> draft */
     @PostMapping("/{id}/reject")
-    public R<HrRequestVO> reject(@PathVariable Long id, @Valid @RequestBody HrRequestRejectDTO dto) {
-        return R.ok(hrRequestService.reject(id, dto.getRejectReason()));
+    public R<HrRequestVO> reject(@PathVariable Long id, @Valid @RequestBody HrRequestRejectDTO dto,
+                                 HttpServletRequest request) {
+        return R.ok(hrRequestService.reject(id, dto.getRejectReason(), currentUserId(request)));
     }
 
     /** 关闭：open -> closed */
     @PostMapping("/{id}/close")
-    public R<HrRequestVO> close(@PathVariable Long id, @Valid @RequestBody HrRequestCloseDTO dto) {
-        return R.ok(hrRequestService.close(id, dto.getCloseReason()));
+    public R<HrRequestVO> close(@PathVariable Long id, @Valid @RequestBody HrRequestCloseDTO dto,
+                                HttpServletRequest request) {
+        return R.ok(hrRequestService.close(id, dto.getCloseReason(), currentUserId(request)));
     }
 
     /** 重新打开：closed -> draft */
     @PostMapping("/{id}/reopen")
-    public R<HrRequestVO> reopen(@PathVariable Long id) {
-        return R.ok(hrRequestService.reopen(id));
+    public R<HrRequestVO> reopen(@PathVariable Long id, HttpServletRequest request) {
+        return R.ok(hrRequestService.reopen(id, currentUserId(request)));
     }
 
     /** 手动修正已入职数（触发 auto_close 判定） */
     @PostMapping("/{id}/headcount")
-    public R<HrRequestVO> headcount(@PathVariable Long id, @Valid @RequestBody HrRequestHeadcountDTO dto) {
-        return R.ok(hrRequestService.updateHeadcount(id, dto.getHeadcountFilled()));
+    public R<HrRequestVO> headcount(@PathVariable Long id, @Valid @RequestBody HrRequestHeadcountDTO dto,
+                                    HttpServletRequest request) {
+        return R.ok(hrRequestService.updateHeadcount(id, dto.getHeadcountFilled(), currentUserId(request)));
+    }
+
+    /** 登录态由 AuthInterceptor 保证，此处直接取挂载的 userId */
+    private Long currentUserId(HttpServletRequest request) {
+        return (Long) request.getAttribute("userId");
     }
 }

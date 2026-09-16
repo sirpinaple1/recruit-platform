@@ -102,6 +102,10 @@ async function run(fn: () => Promise<HrRequestVO>): Promise<void> {
     drafts.value = await fetchDraftsByRequest(requestId.value);
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.message : '操作失败，请稍后重试';
+    // 409 = 乐观并发控制未命中（状态已被他人改变）：立即重载，否则界面停留在过期状态、再点仍是 409
+    if (e instanceof ApiError && e.code === 409) {
+      await load();
+    }
   } finally {
     busy.value = false;
   }
