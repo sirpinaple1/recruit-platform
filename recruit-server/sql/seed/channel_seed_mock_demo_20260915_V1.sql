@@ -3,9 +3,11 @@ SET NAMES utf8mb4;
 -- T3.1 mock_demo 渠道种子数据
 -- 依据：docs/design/channel-publish.md §5.2 / §8
 -- 配合 T4 fixtures/publish-mock.html 本地模拟发布页使用
+-- 幂等：INSERT IGNORE 依赖 channel.uk_code(code) 与 PK(id)，可重复执行
+-- 位置：种子数据统一放 sql/seed/（见 ADR-002）
 -- ====================================
 
-INSERT INTO channel (id, code, name, publish_url_pattern, field_map_json, deep_link_template, capability, status, sort_order, remark)
+INSERT IGNORE INTO channel (id, code, name, publish_url_pattern, field_map_json, deep_link_template, capability, status, sort_order, remark)
 VALUES (
     1,
     'mock_demo',

@@ -13,6 +13,14 @@ spring:
       password: ${REDIS_PASSWORD}
       timeout: 3s
 
+# JWT 登录态：secret 必须由环境变量 JWT_SECRET 注入。
+# 刻意不给默认值 —— 缺失时应用启动即失败（fail-fast），
+# 避免生产环境误用开发密钥签发 token（JwtUtil 的 @Value("${jwt.secret}") 无默认值，
+# 基线 application.yml 也不提供该键；dev 的本地默认值只存在于 application-dev.yml）。
+jwt:
+  secret: ${JWT_SECRET}
+  expire-hours: ${JWT_EXPIRE_HOURS:24}
+
 logging:
   level:
     root: info

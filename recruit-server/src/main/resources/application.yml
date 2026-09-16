@@ -6,6 +6,15 @@ spring:
     name: recruit-server
   profiles:
     active: dev
+  datasource:
+    # 会话时区统一钉成 UTC——放在基线配置，dev/prod 共同继承，不依赖各 profile 的 JDBC URL
+    # 是否记得带上 connectionTimeZone/forceConnectionTimeZoneToSession 参数。
+    # 必要性：DATETIME 列不带时区，DB 的 DEFAULT CURRENT_TIMESTAMP 按会话时区取值，
+    # 而应用写入的是 UTC 的 LocalDateTime；二者基准不一致会让时间列出现 ±8h 偏差
+    # （T4.5 已因此修过一次存量数据）。用 '+00:00' 而非 'UTC'：数字偏移量不依赖
+    # MySQL 是否导入了时区命名表，任何实例都能执行成功。
+    hikari:
+      connection-init-sql: SET time_zone = '+00:00'
   # 时间统一按 UTC 存储与序列化（见 README 数据约定）
   jackson:
     time-zone: UTC

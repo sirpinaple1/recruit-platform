@@ -1,15 +1,11 @@
 SET NAMES utf8mb4;
 -- ====================================
--- 初始化数据脚本
+-- 字典种子数据（原 docker/mysql/init/002_data.sql 迁入）
+-- 依据：docs/architecture/adr/ADR-002-database-single-source.md
+-- 幂等：INSERT IGNORE 依赖 sys_dict.uk_type_code(type, code)，可重复执行
 -- ====================================
 
--- seed accounts: admin/admin123, hr001/hr123456 (BCrypt)
-INSERT INTO sys_user (id, username, password, real_name, role, status) VALUES
-(1, 'admin', '$2a$10$fXCKeAyxtbw/P2qlvMzrvO3EZtSDRbXVCxu7nwCv03nYLk7Wvgupy', '系统管理员', 'ADMIN', 'active'),
-(2, 'hr001', '$2a$10$wAF4a73ZFo33vCwhPYZH9uZ/q1qPMVncJ1xSek1jdBgHaW5TMJAJm', 'HR张三', 'HR', 'active');
-
--- 插入枚举值字典
-INSERT INTO sys_dict (type, code, label, sort_order, status) VALUES
+INSERT IGNORE INTO sys_dict (type, code, label, sort_order, status) VALUES
 -- 简历状态
 ('resume_status', 'pending', '待解析', 1, 'active'),
 ('resume_status', 'parsing', '解析中', 2, 'active'),
@@ -33,7 +29,7 @@ INSERT INTO sys_dict (type, code, label, sort_order, status) VALUES
 ('education_level', 'master', '硕士', 4, 'active'),
 ('education_level', 'doctor', '博士', 5, 'active'),
 
--- 用户角色
+-- 用户角色（与 com.recruit.common.Roles 一致）
 ('user_role', 'ADMIN', '管理员', 1, 'active'),
 ('user_role', 'HR', 'HR专员', 2, 'active'),
 ('user_role', 'INTERVIEWER', '面试官', 3, 'active'),
