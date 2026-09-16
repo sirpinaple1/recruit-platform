@@ -130,7 +130,11 @@ headcount：filled >= total 且 auto_close=1 → 自动 close(filled)（filled �
 索引：`INDEX idx_request`、`INDEX idx_channel`、`INDEX idx_status`。
 重渲染规则：同一 (request, channel) 只允许一条 pending；重新生成（平台改版后）时旧草稿置 cancelled，台账 record 保留审计。
 
-**渲染白名单（硬编码常量）**：`title / jobDescription / jobRequirement / location / salaryMin / salaryMax / salaryText / education / experienceYears / employmentType`——其余字段一律不进 `fields_json`。
+**渲染白名单（硬编码常量）**：`title / jobDescription / jobRequirement / location / salaryMin / salaryMax / salaryText / education / experienceYears / employmentType / deptName / headcountTotal / requestNo / publishDate`——其余字段一律不进 `fields_json`。
+
+> 共 **14 项**（本节早期稿写的是 10 项，落地时补入 `deptName`、`headcountTotal`、`requestNo`、`publishDate` 四项，2026-09-16 回填）。
+> 代码唯一真源：`PublishDraftService.RENDER_WHITELIST`；其中 `salaryText`、`publishDate` 为**派生字段**（非 `hr_request` 表列）。
+> 有单测 `PublishDraftRenderTest` 以黄金列表**双向比对**锁定该集合，既防漏渲染也防越界泄漏。
 
 ### 5.4 `publish_record` 发布台账（T3.3）
 

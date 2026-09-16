@@ -25,12 +25,37 @@
 
 ## 任务导航
 
+> 下表**只列实际存在的文件**。指向不存在的路径比没有导航更糟——它会让人（和 AI）以为某份规范已经写了。
+
 | 我想... | 看这里 |
 |---|---|
-| 了解系统架构 | docs/architecture/overview.md |
-| 了解分层规则 | docs/architecture/layer-structure.md |
-| 查数据库表结构 | docs/architecture/database-schema.md |
-| 了解编码规范 | docs/conventions/coding-standards.md |
-| 了解 API 设计规范 | docs/conventions/api-design.md |
-| 了解某个业务模块 | docs/reference/0X-模块名.md |
-| 设计新功能 | docs/design/feature-template.md |
+| 了解系统架构 | [docs/architecture/overview.md](docs/architecture/overview.md) |
+| 了解分层规则与依赖方向 | [docs/architecture/layer-structure.md](docs/architecture/layer-structure.md) |
+| 查数据库表结构 | [docs/architecture/database-schema.md](docs/architecture/database-schema.md) |
+| 查「为什么这样设计」 | [docs/architecture/adr/](docs/architecture/adr/README.md)（ADR 索引，共 5 份） |
+| 了解渠道发布模块设计 | [docs/design/channel-publish.md](docs/design/channel-publish.md) |
+| 了解 Java ↔ Python 集成 | [docs/conventions/java-python-integration.md](docs/conventions/java-python-integration.md) |
+| 本地环境搭建 | [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md) |
+| 后端开发约定 | [recruit-server/AGENTS.md](recruit-server/AGENTS.md) |
+| 前端开发约定 | [recruit-web/AGENTS.md](recruit-web/AGENTS.md) |
+| AI 服务开发约定 | [recruit-ai-service/AGENTS.md](recruit-ai-service/AGENTS.md) |
+| 数据库灌库 | `./scripts/db-bootstrap.sh`（见 [ADR-002](docs/architecture/adr/ADR-002-database-single-source.md)） |
+
+### 尚未建立（正文缺失，勿引用）
+
+以下路径在多处文档中被提及但**文件不存在**，属已知文档债务。需要时再补，不要在导航里给假链接：
+
+| 缺失文件 | 本应承载的内容 |
+|---|---|
+| `docs/conventions/coding-standards.md` | 编码规范（命名、异常、日志）——部分内容目前散在 `layer-structure.md` |
+| `docs/conventions/api-design.md` | API 设计规范（路径、错误码契约）——目前只有 `overview.md` §请求链路 的片段 |
+| `docs/reference/0X-模块名.md` | 逐模块功能参考手册 |
+| `docs/design/feature-template.md` | 新功能设计模板 |
+
+### 存在但需谨慎阅读
+
+| 文件 | 原因 |
+|---|---|
+| `docs/architecture/ai-integration-architecture.md`、`docs/architecture/model-training-pipeline.md` | 描述的是**未实装域**（AI 服务一期未落地，见 `overview.md` §已知结构缺口）。它们不是当前系统的实况，别据此判断"已有基础" |
+| `docs/SETUP_COMPLETE.md`、`docs/AI_MODELS_DEMO.md` | 历史过程记录，非规范。以 `ENVIRONMENT_SETUP.md` 为准 |
+

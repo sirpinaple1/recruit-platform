@@ -658,5 +658,9 @@ mysql -e "SELECT * FROM ai_metrics WHERE model_version = 'qwen-resume-v1' LIMIT 
 ## 相关文档
 
 - [AI能力集成架构](./ai-integration-architecture.md)
-- [数据标注规范](./data-annotation-guidelines.md)
+
+> ⚠️ 本文与 `ai-integration-architecture.md` 同属**尚未实装的域**，不是系统现状。
+>
+> 以下文档**尚未撰写**（勿按链接查找）：`data-annotation-guidelines.md`（数据标注规范）。
+
 - [Java-Python集成规范](../conventions/java-python-integration.md)

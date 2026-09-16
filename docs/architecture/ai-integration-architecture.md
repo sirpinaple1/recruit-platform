@@ -503,10 +503,13 @@ Kubernetes Cluster
 
 ## 十一、相关文档
 
-- [AI服务API设计](./ai-service-api-design.md)
 - [模型训练Pipeline](./model-training-pipeline.md)
-- [数据标注规范](./data-annotation-guidelines.md)
 - [Java-Python集成指南](../conventions/java-python-integration.md)
+- [架构总览](./overview.md) / [ADR 索引](./adr/README.md)
+
+> ⚠️ 本文描述的是**尚未实装的域**（AI 服务一期未落地）。阅读时不要把这里的表结构/接口当成系统现状，现状见 `overview.md` §已知结构缺口。
+>
+> 以下文档**尚未撰写**（勿按链接查找）：`ai-service-api-design.md`（AI 服务 API 设计）、`data-annotation-guidelines.md`（数据标注规范）。
 
 ---
 

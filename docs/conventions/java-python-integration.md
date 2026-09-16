@@ -603,5 +603,9 @@ public ResumeParseResult parseResume(MultipartFile file, Long jobId) {
 ## 相关文档
 
 - [AI能力集成架构](../architecture/ai-integration-architecture.md)
-- [后端编码规范](./coding-standards.md)
-- [API设计规范](./api-design.md)
+- [架构总览](../architecture/overview.md) / [分层规则](../architecture/layer-structure.md)
+- [ADR 索引](../architecture/adr/README.md)
+
+> 以下文档**尚未撰写**（勿按链接查找）：
+> - `coding-standards.md`（后端编码规范）—— 命名/异常/日志部分散见 `layer-structure.md`
+> - `api-design.md`（API 设计规范）—— 目前只有 `overview.md` §请求链路 的片段
