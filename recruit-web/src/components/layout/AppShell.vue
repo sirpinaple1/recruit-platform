@@ -40,6 +40,8 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { name: 'interviews', label: '面试', icon: 'M2 3.5h12V14H2zM2 6.8h12M5.5 2v3M10.5 2v3', disabled: true },
   { name: 'analytics', label: '数据', icon: 'M2 13.5h12M4.2 11.4V8.6M8 11.4V5.4M11.8 11.4V9.6', disabled: true },
   { name: 'channels', label: '渠道管理', icon: 'M2 3h12v10H2zM2 6.5h12M5 6.5v6.5' },
+  { name: 'publish-records', label: '发布台账', icon: 'M3 2h10v12H3zM5.5 5.5h5M5.5 8.5h5M5.5 11.5h3' },
+  { name: 'extension-tokens', label: '扩展授权', icon: 'M4 7h8v6H4zM6 7V5a2 2 0 0 1 4 0v2' },
 ];
 
 const todayText = computed(() => {

@@ -31,6 +31,16 @@ const router = createRouter({
       component: () => import('@/pages/channels/ChannelListPage.vue'),
     },
     {
+      path: '/publish-records',
+      name: 'publish-records',
+      component: () => import('@/pages/publish-records/PublishRecordListPage.vue'),
+    },
+    {
+      path: '/extension-tokens',
+      name: 'extension-tokens',
+      component: () => import('@/pages/extension-tokens/ExtensionTokenListPage.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/',
     },
