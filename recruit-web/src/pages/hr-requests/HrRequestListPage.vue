@@ -151,7 +151,7 @@ async function handlePublish(requestId: string): Promise<void> {
   const draft = drafts.value.get(requestId);
   if (!draft) return;
   
-  await sendFillRequest(draft.recordId);
+  await sendFillRequest(draft.id);
 }
 
 onMounted(() => {
@@ -249,19 +249,19 @@ onMounted(() => {
         <div>
           <button
             v-if="drafts.has(row.id)"
-            :disabled="getButtonState(drafts.get(row.id)!.recordId).disabled"
+            :disabled="getButtonState(drafts.get(row.id)!.id).disabled"
             class="h-7 rounded-md border px-3 text-xs font-medium transition"
             :class="[
-              getButtonState(drafts.get(row.id)!.recordId).state === 'ready' 
+              getButtonState(drafts.get(row.id)!.id).state === 'ready' 
                 ? 'border-primary bg-primary text-white hover:brightness-110' 
-                : getButtonState(drafts.get(row.id)!.recordId).state === 'not_installed'
+                : getButtonState(drafts.get(row.id)!.id).state === 'not_installed'
                 ? 'border-line bg-gray-100 text-t4 cursor-not-allowed'
                 : 'border-line bg-white text-t2'
             ]"
-            :title="getButtonState(drafts.get(row.id)!.recordId).tooltip"
+            :title="getButtonState(drafts.get(row.id)!.id).tooltip"
             @click.stop="handlePublish(row.id)"
           >
-            {{ getButtonState(drafts.get(row.id)!.recordId).text }}
+            {{ getButtonState(drafts.get(row.id)!.id).text }}
           </button>
         </div>
         <div>
