@@ -10,7 +10,7 @@
   ],
   "host_permissions": [
     "http://localhost:6017/*",
-    "http://localhost:8430/*",
+    "http://localhost:5176/*",
     "https://www.zhipin.com/*"
   ],
   "background": {
@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": [
-        "http://localhost:8430/*"
+        "http://localhost:5176/*"
       ],
       "js": [
         "content/message-relay.js",
