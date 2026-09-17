@@ -23,8 +23,8 @@ window.addEventListener('message', (event) => {
   
   const msg = event.data;
   
-  // 过滤：只转发招聘扩展的消息
-  if (!msg || msg.source !== 'recruit-bridge') return;
+  // 过滤：只转发招聘扩展的消息（接受 bridge 和 platform 两种来源）
+  if (!msg || (msg.source !== 'recruit-bridge' && msg.source !== 'recruit-platform')) return;
   
   // Phase 1: 零配置授权
   if (msg.type === 'RECRUIT_SESSION_DETECTED') {
