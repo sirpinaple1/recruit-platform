@@ -150,8 +150,11 @@ function onFormSaved(): void {
 async function handlePublish(requestId: string): Promise<void> {
   const draft = drafts.value.get(requestId);
   if (!draft) return;
-  
-  await sendFillRequest(draft.id);
+  if (!draft.recordId) {
+    console.error('草稿没有关联的台账 recordId:', draft);
+    return;
+  }
+  await sendFillRequest(draft.recordId);
 }
 
 onMounted(() => {
@@ -248,20 +251,20 @@ onMounted(() => {
         <div class="cursor-pointer text-[12.5px] text-t3" @click="openDetail(row)">{{ formatUtcIso(row.updatedAt) }}</div>
         <div>
           <button
-            v-if="drafts.has(row.id)"
-            :disabled="getButtonState(drafts.get(row.id)!.id).disabled"
+            v-if="drafts.has(row.id) && drafts.get(row.id)!.recordId"
+            :disabled="getButtonState(drafts.get(row.id)!.recordId!).disabled"
             class="h-7 rounded-md border px-3 text-xs font-medium transition"
             :class="[
-              getButtonState(drafts.get(row.id)!.id).state === 'ready' 
+              getButtonState(drafts.get(row.id)!.recordId!).state === 'ready' 
                 ? 'border-primary bg-primary text-white hover:brightness-110' 
-                : getButtonState(drafts.get(row.id)!.id).state === 'not_installed'
+                : getButtonState(drafts.get(row.id)!.recordId!).state === 'not_installed'
                 ? 'border-line bg-gray-100 text-t4 cursor-not-allowed'
                 : 'border-line bg-white text-t2'
             ]"
-            :title="getButtonState(drafts.get(row.id)!.id).tooltip"
+            :title="getButtonState(drafts.get(row.id)!.recordId!).tooltip"
             @click.stop="handlePublish(row.id)"
           >
-            {{ getButtonState(drafts.get(row.id)!.id).text }}
+            {{ getButtonState(drafts.get(row.id)!.recordId!).text }}
           </button>
         </div>
         <div>

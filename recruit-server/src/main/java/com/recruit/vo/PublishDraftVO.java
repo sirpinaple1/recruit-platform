@@ -20,6 +20,9 @@ public class PublishDraftVO {
 
     private String requestId;
 
+    /** 一对一台账 id（用于扩展填充请求） */
+    private String recordId;
+
     private String channelId;
 
     private String channelCode;
@@ -42,10 +45,11 @@ public class PublishDraftVO {
 
     private LocalDateTime updatedAt;
 
-    public static PublishDraftVO from(PublishDraft d, Channel channel) {
+    public static PublishDraftVO from(PublishDraft d, Channel channel, Long recordId) {
         return PublishDraftVO.builder()
                 .id(d.getId() == null ? null : String.valueOf(d.getId()))
                 .requestId(d.getRequestId() == null ? null : String.valueOf(d.getRequestId()))
+                .recordId(recordId == null ? null : String.valueOf(recordId))
                 .channelId(d.getChannelId() == null ? null : String.valueOf(d.getChannelId()))
                 .channelCode(channel == null ? null : channel.getCode())
                 .channelName(channel == null ? null : channel.getName())

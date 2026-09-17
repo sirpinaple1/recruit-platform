@@ -13,6 +13,7 @@ export type DraftStatus = z.infer<typeof DraftStatusSchema>;
 export const PublishDraftVOSchema = z.object({
   id: z.string(),
   requestId: z.string(),
+  recordId: z.string().nullable(),
   channelId: z.string(),
   channelCode: z.string().nullable(),
   channelName: z.string().nullable(),

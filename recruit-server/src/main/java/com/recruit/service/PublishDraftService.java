@@ -8,8 +8,10 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.recruit.entity.Channel;
 import com.recruit.entity.HrRequest;
 import com.recruit.entity.PublishDraft;
+import com.recruit.entity.PublishRecord;
 import com.recruit.mapper.ChannelMapper;
 import com.recruit.mapper.PublishDraftMapper;
+import com.recruit.mapper.PublishRecordMapper;
 import com.recruit.vo.PublishDraftVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -43,6 +45,7 @@ public class PublishDraftService {
 
     private final PublishDraftMapper publishDraftMapper;
     private final ChannelMapper channelMapper;
+    private final PublishRecordMapper publishRecordMapper;
     private final PublishRecordService publishRecordService;
 
     /**
@@ -89,10 +92,20 @@ public class PublishDraftService {
         if (drafts.isEmpty()) {
             return List.of();
         }
+        
+        // 查询渠道信息
         Map<Long, Channel> channelById = channelMapper.selectList(null).stream()
                 .collect(Collectors.toMap(Channel::getId, Function.identity()));
+        
+        // 查询台账信息（通过 draft_id）
+        List<Long> draftIds = drafts.stream().map(PublishDraft::getId).toList();
+        Map<Long, Long> recordIdByDraftId = publishRecordMapper.selectList(
+                new LambdaQueryWrapper<PublishRecord>()
+                        .in(PublishRecord::getDraftId, draftIds)
+        ).stream().collect(Collectors.toMap(PublishRecord::getDraftId, PublishRecord::getId));
+        
         return drafts.stream()
-                .map(d -> PublishDraftVO.from(d, channelById.get(d.getChannelId())))
+                .map(d -> PublishDraftVO.from(d, channelById.get(d.getChannelId()), recordIdByDraftId.get(d.getId())))
                 .toList();
     }
 
