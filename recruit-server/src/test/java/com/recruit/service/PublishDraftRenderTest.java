@@ -7,6 +7,7 @@ import com.recruit.entity.HrRequest;
 import com.recruit.entity.PublishDraft;
 import com.recruit.mapper.ChannelMapper;
 import com.recruit.mapper.PublishDraftMapper;
+import com.recruit.mapper.PublishRecordMapper;
 import com.recruit.support.MybatisPlusTestSupport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -154,10 +155,11 @@ class PublishDraftRenderTest {
     private PublishDraft firstDraft(HrRequest request, Channel channel) {
         PublishDraftMapper draftMapper = mock(PublishDraftMapper.class);
         ChannelMapper channelMapper = mock(ChannelMapper.class);
+        PublishRecordMapper recordMapper = mock(PublishRecordMapper.class);
         PublishRecordService recordService = mock(PublishRecordService.class);
         when(channelMapper.selectList(any())).thenReturn(List.of(channel));
 
-        new PublishDraftService(draftMapper, channelMapper, recordService).renderForRequest(request);
+        new PublishDraftService(draftMapper, channelMapper, recordMapper, recordService).renderForRequest(request);
 
         ArgumentCaptor<PublishDraft> captor = ArgumentCaptor.forClass(PublishDraft.class);
         org.mockito.Mockito.verify(draftMapper).insert(captor.capture());
