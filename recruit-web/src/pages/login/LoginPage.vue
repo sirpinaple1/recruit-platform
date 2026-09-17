@@ -201,6 +201,9 @@ async function onSubmit(): Promise<void> {
     authStore.login(vo);
     done.value = true;
     showAlert('ok', '登录成功，正在进入招聘工作台…');
+    
+    sessionStorage.setItem('justLoggedIn', 'true');
+    
     setTimeout(() => {
       void router.push({ name: 'workbench' });
     }, 800);

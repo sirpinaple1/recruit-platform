@@ -3,12 +3,15 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { fetchHrRequestPage } from '@/lib/api/hr-request.api';
+import { fetchDraftsByRequest } from '@/lib/api/publish-draft.api';
 import { ApiError } from '@/lib/httpClient';
 import { formatUtcIso } from '@/lib/utils';
 import AppShell from '@/components/layout/AppShell.vue';
 import { STATUS_LABELS, type HrRequestVO } from '@/types/hr-request.types';
 import HrRequestFormDialog from './HrRequestFormDialog.vue';
 import { STATUS_CHIP_CLASS } from './hr-request-ui';
+import { useExtensionBridge } from '@/composables/useExtensionBridge';
+import type { PublishDraftVO } from '@/types/publish-draft.types';
 
 /**
  * 职位列表页（对齐原型 s2-jobs：搜索 + 状态筛选 + 表格 + 分页）。
@@ -16,8 +19,10 @@ import { STATUS_CHIP_CLASS } from './hr-request-ui';
  */
 
 const PAGE_SIZE = 10;
+const BOSS_CHANNEL_ID = '2099758705647771650';
 
 const router = useRouter();
+const { getButtonState, sendFillRequest } = useExtensionBridge();
 
 const statusFilter = ref('');
 const keyword = ref('');
@@ -27,6 +32,8 @@ const total = ref(0);
 const records = ref<HrRequestVO[]>([]);
 const loading = ref(false);
 const errorMsg = ref('');
+
+const drafts = ref<Map<string, PublishDraftVO>>(new Map());
 
 const formVisible = ref(false);
 const formMode = ref<'create' | 'edit'>('create');
@@ -64,13 +71,38 @@ async function load(): Promise<void> {
     if (current.value > page.pages && page.pages > 0) {
       current.value = page.pages;
       await load();
+      return;
     }
+    
+    await loadDrafts();
   } catch (e) {
     if (e instanceof ApiError && e.code !== 401) errorMsg.value = e.message;
     else if (!(e instanceof ApiError)) errorMsg.value = '加载失败，请稍后重试';
   } finally {
     loading.value = false;
   }
+}
+
+async function loadDrafts(): Promise<void> {
+  const newDrafts = new Map<string, PublishDraftVO>();
+  
+  for (const record of records.value) {
+    if (record.status === 'open') {
+      try {
+        const requestDrafts = await fetchDraftsByRequest(record.id);
+        const bossDraft = requestDrafts.find(
+          (d) => d.channelId === BOSS_CHANNEL_ID && d.status === 'pending'
+        );
+        if (bossDraft) {
+          newDrafts.set(record.id, bossDraft);
+        }
+      } catch (e) {
+        console.error(`Failed to load drafts for request ${record.id}:`, e);
+      }
+    }
+  }
+  
+  drafts.value = newDrafts;
 }
 
 function switchStatus(value: string): void {
@@ -113,6 +145,13 @@ function openDetail(vo: HrRequestVO): void {
 function onFormSaved(): void {
   formVisible.value = false;
   void load();
+}
+
+async function handlePublish(requestId: string): Promise<void> {
+  const draft = drafts.value.get(requestId);
+  if (!draft) return;
+  
+  await sendFillRequest(draft.recordId);
 }
 
 onMounted(() => {
@@ -170,12 +209,13 @@ onMounted(() => {
 
     <!-- 表格卡片 -->
     <div class="overflow-hidden rounded-lg border border-line bg-white">
-      <div class="grid grid-cols-[1fr_120px_110px_120px_130px_56px] items-center border-b border-divider bg-[#FAFBFC] px-5 py-2.5 text-[11.5px] font-medium text-t3">
+      <div class="grid grid-cols-[1fr_120px_110px_120px_130px_140px_56px] items-center border-b border-divider bg-[#FAFBFC] px-5 py-2.5 text-[11.5px] font-medium text-t3">
         <div>职位</div>
         <div>招聘进度</div>
         <div>状态</div>
         <div>负责人</div>
         <div>更新时间</div>
+        <div>发布</div>
         <div>操作</div>
       </div>
 
@@ -188,25 +228,42 @@ onMounted(() => {
       <div
         v-for="row in visibleRows"
         :key="row.id"
-        class="grid min-h-16 cursor-pointer grid-cols-[1fr_120px_110px_120px_130px_56px] items-center gap-5 border-b border-divider px-5 text-[13px] text-t2 transition last:border-b-0 hover:bg-[#FAFBFC]"
-        @click="openDetail(row)"
+        class="grid min-h-16 grid-cols-[1fr_120px_110px_120px_130px_140px_56px] items-center gap-5 border-b border-divider px-5 text-[13px] text-t2 transition last:border-b-0 hover:bg-[#FAFBFC]"
       >
-        <div class="min-w-0">
+        <div class="min-w-0 cursor-pointer" @click="openDetail(row)">
           <div class="truncate text-[13px] font-semibold text-t1">{{ row.title }}</div>
           <div class="mt-0.5 truncate text-[11.5px] text-t4">
             {{ row.deptName }}<template v-if="row.location"> · {{ row.location }}</template>
           </div>
         </div>
-        <div class="text-[13px] font-semibold text-t1">
+        <div class="cursor-pointer text-[13px] font-semibold text-t1" @click="openDetail(row)">
           {{ row.headcountFilled }}<span class="font-normal text-t4">/{{ row.headcountTotal }}</span>
         </div>
-        <div>
+        <div class="cursor-pointer" @click="openDetail(row)">
           <span class="rounded px-2 py-0.5 text-[11.5px] font-medium" :class="STATUS_CHIP_CLASS[row.status]">
             {{ STATUS_LABELS[row.status] }}
           </span>
         </div>
-        <div class="text-[12.5px] text-t3">—</div>
-        <div class="text-[12.5px] text-t3">{{ formatUtcIso(row.updatedAt) }}</div>
+        <div class="cursor-pointer text-[12.5px] text-t3" @click="openDetail(row)">—</div>
+        <div class="cursor-pointer text-[12.5px] text-t3" @click="openDetail(row)">{{ formatUtcIso(row.updatedAt) }}</div>
+        <div>
+          <button
+            v-if="drafts.has(row.id)"
+            :disabled="getButtonState(drafts.get(row.id)!.recordId).disabled"
+            class="h-7 rounded-md border px-3 text-xs font-medium transition"
+            :class="[
+              getButtonState(drafts.get(row.id)!.recordId).state === 'ready' 
+                ? 'border-primary bg-primary text-white hover:brightness-110' 
+                : getButtonState(drafts.get(row.id)!.recordId).state === 'not_installed'
+                ? 'border-line bg-gray-100 text-t4 cursor-not-allowed'
+                : 'border-line bg-white text-t2'
+            ]"
+            :title="getButtonState(drafts.get(row.id)!.recordId).tooltip"
+            @click.stop="handlePublish(row.id)"
+          >
+            {{ getButtonState(drafts.get(row.id)!.recordId).text }}
+          </button>
+        </div>
         <div>
           <button
             v-if="row.status === 'draft'"

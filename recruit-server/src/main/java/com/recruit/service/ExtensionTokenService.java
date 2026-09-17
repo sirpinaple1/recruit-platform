@@ -8,6 +8,7 @@ import com.recruit.entity.SysUser;
 import com.recruit.mapper.ExtensionTokenMapper;
 import com.recruit.mapper.SysUserMapper;
 import com.recruit.vo.ExtensionTokenCreatedVO;
+import com.recruit.vo.ExtensionSessionTokenVO;
 import com.recruit.vo.ExtensionTokenVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -100,6 +101,48 @@ public class ExtensionTokenService {
         SysUser user = sysUserMapper.selectById(entity.getUserId());
         return ExtensionTokenVO.from(extensionTokenMapper.selectById(id),
                 user == null ? null : user.getRealName());
+    }
+
+    /**
+     * 零配置授权：登录态换权（复用或新签发）
+     * 
+     * @param userId 当前登录用户
+     * @param oldToken 扩展本地已有 token（可选）
+     * @return 复用或新签发的 token 信息
+     */
+    public ExtensionSessionTokenVO resolveForSession(Long userId, String oldToken) {
+        if (StringUtils.hasText(oldToken)) {
+            String hash = sha256Hex(oldToken.trim());
+            ExtensionToken existing = extensionTokenMapper.selectOne(new LambdaQueryWrapper<ExtensionToken>()
+                    .eq(ExtensionToken::getTokenHash, hash)
+                    .eq(ExtensionToken::getStatus, "active")
+                    .eq(ExtensionToken::getUserId, userId)
+                    .last("LIMIT 1"));
+            
+            if (existing != null) {
+                log.info("扩展授权复用：id={}, user={}", existing.getId(), userId);
+                extensionTokenMapper.update(null, new LambdaUpdateWrapper<ExtensionToken>()
+                        .eq(ExtensionToken::getId, existing.getId())
+                        .set(ExtensionToken::getLastUsedAt, LocalDateTime.now(ZoneOffset.UTC)));
+                
+                return ExtensionSessionTokenVO.builder()
+                        .token(null)
+                        .reused(true)
+                        .tokenId(String.valueOf(existing.getId()))
+                        .expiresAt(null)
+                        .build();
+            }
+        }
+        
+        ExtensionTokenCreatedVO created = create("session-auto-" + System.currentTimeMillis(), userId);
+        log.info("扩展授权新签发：id={}, user={}", created.getId(), userId);
+        
+        return ExtensionSessionTokenVO.builder()
+                .token(created.getToken())
+                .reused(false)
+                .tokenId(created.getId())
+                .expiresAt(null)
+                .build();
     }
 
     /**

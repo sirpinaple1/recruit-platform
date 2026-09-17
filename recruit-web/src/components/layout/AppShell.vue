@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAuthStore } from '@/stores/auth';
@@ -19,6 +19,13 @@ defineProps<{
 const route = useRoute();
 const router = useRouter();
 const { user, logout } = useAuthStore();
+
+onMounted(() => {
+  if (sessionStorage.getItem('justLoggedIn') === 'true') {
+    sessionStorage.removeItem('justLoggedIn');
+    window.location.reload();
+  }
+});
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: '系统管理员',

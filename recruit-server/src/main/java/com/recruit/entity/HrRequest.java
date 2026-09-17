@@ -77,6 +77,9 @@ public class HrRequest {
     /** 创建人 sys_user.id */
     private Long createdBy;
 
+    /** 招聘负责人 sys_user.id */
+    private Long ownerUserId;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
