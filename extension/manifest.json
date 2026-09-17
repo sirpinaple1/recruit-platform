@@ -10,7 +10,34 @@
   ],
   "host_permissions": [
     "http://localhost:6017/*",
-    "http://localhost:8430/*"
+    "http://localhost:8430/*",
+    "https://www.zhipin.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:8430/*"
+      ],
+      "js": [
+        "content/message-relay.js",
+        "content/bridge.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.zhipin.com/web/geek/job-recommend*",
+        "https://www.zhipin.com/web/geek/job/publish*"
+      ],
+      "js": [
+        "content/message-relay.js",
+        "content/sentinel.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
   "options_ui": {
     "page": "options/index.html",

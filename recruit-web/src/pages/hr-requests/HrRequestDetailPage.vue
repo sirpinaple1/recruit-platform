@@ -56,6 +56,10 @@ const copiedDraftId = ref('');
 
 const editVisible = ref(false);
 
+const visibleDrafts = computed(() => {
+  return drafts.value.filter(d => d.status !== 'cancelled');
+});
+
 async function load(): Promise<void> {
   loading.value = true;
   loadError.value = '';
@@ -330,11 +334,11 @@ const PIPELINE_STAGES: ReadonlyArray<{ label: string; success?: boolean }> = [
           <span class="text-[13.5px] font-semibold">渠道发布</span>
           <span class="text-[11.5px] text-t4">审批通过后自动为启用渠道生成发布草稿，关闭时未发布草稿自动取消</span>
         </div>
-        <div v-if="drafts.length === 0" class="px-5 py-10 text-center text-sm text-t4">
+        <div v-if="visibleDrafts.length === 0" class="px-5 py-10 text-center text-sm text-t4">
           暂无发布草稿{{ r.status === 'draft' || r.status === 'pending_approval' ? '，审批通过后自动生成' : '' }}
         </div>
         <div
-          v-for="draft in drafts"
+          v-for="draft in visibleDrafts"
           :key="draft.id"
           class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-divider px-5 py-3.5 last:border-b-0 hover:bg-[#FAFBFC]"
         >
