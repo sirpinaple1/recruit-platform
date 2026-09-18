@@ -14,6 +14,19 @@ SET NAMES utf8mb4;
 --        · _unit: yuanToK —— hr_request.salary_min 存「元」，平台要「K」
 --      简化或"整理"这些配置会让填充直接失效。
 --
+-- 2026-09-18 修订：职位类型字段由 employmentType(auto-suggest) 改为
+--      jobCategory(type: recommend)。BOSS 的「职位类型」是职类而非雇佣类型，
+--      依赖「职位描述失焦」触发的平台预测接口，由引擎选平台推荐项，
+--      无需配置值（详见 upgrade/channel_boss_add_employment_type_20260918_V1.sql）。
+--
+-- 2026-09-18 二次修订：新增 success 节点（哨兵自动回执，Phase 2.6 §6）。
+--      信号来源：BOSS 发布按钮 saveJob 成功分支 $toast("保存成功","success")
+--      渲染的 toast DOM（<div class="toast">…<i class="icon-toast-success">，存活约 2.3s）。
+--      不配 urlPattern——发布成功后页面会跳职位列表，URL 模式无法稳定命中，
+--      只靠选择器单判定（sentinel.js 对无配置的一方直接跳过判定）。
+--      timeoutMs 120s：给用户填充后核对/修改表单再手动发布的充裕时间
+--      （详见 upgrade/channel_boss_add_sentinel_success_20260918_V2.sql）。
+--
 -- ⚠️ publish_entry_url 待确认（**必须人工核对后再用于生产**）：
 --      本文件填的值是从本地库 publish_url_pattern 抄来的，属**权宜值**。
 --      该 URL 带易变 query 参数（jobversion=11363 / encryptId=0 / enterSource=2），
@@ -38,7 +51,7 @@ VALUES (
     'BOSS直聘',
     'https://www.zhipin.com/web/frame/job/publish-edit?jobversion=11363&encryptId=0&enterSource=2',
     'https://www.zhipin.com/web/frame/job/publish-edit?jobversion=11363&encryptId=0&enterSource=2',
-    '{"fields": [{"key": "title", "type": "input", "match": ["职位名称"]}, {"key": "jobDescription", "type": "textarea", "match": ["职位描述", "请勿填写QQ"]}, {"key": "experienceYears", "type": "dropdown", "match": ["经验"], "valueMap": {"1": "1-3年", "2": "1-3年", "3": "3-5年", "4": "3-5年", "5": "5-10年", "6": "5-10年", "7": "5-10年", "8": "5-10年", "9": "5-10年", "10": "10年以上"}}, {"key": "education", "type": "dropdown", "match": ["学历"], "valueMap": {"doctor": "博士", "master": "硕士", "博士": "博士", "大专": "大专", "本科": "本科", "硕士": "硕士", "高中": "高中", "bachelor": "本科", "associate": "大专", "high_school": "高中"}}, {"key": "salaryMin", "nth": 0, "type": "dropdown", "match": ["薪资范围", "最低月薪"], "valueMap": {"_unit": "yuanToK"}}, {"key": "salaryMax", "nth": 1, "type": "dropdown", "match": ["薪资范围", "最高月薪"], "valueMap": {"_unit": "yuanToK"}}]}',
+    '{"fields": [{"key": "title", "type": "input", "match": ["职位名称"]}, {"key": "jobDescription", "type": "textarea", "match": ["职位描述", "请勿填写QQ"]}, {"key": "experienceYears", "type": "dropdown", "match": ["经验"], "valueMap": {"1": "1-3年", "2": "1-3年", "3": "3-5年", "4": "3-5年", "5": "5-10年", "6": "5-10年", "7": "5-10年", "8": "5-10年", "9": "5-10年", "10": "10年以上"}}, {"key": "education", "type": "dropdown", "match": ["学历"], "valueMap": {"doctor": "博士", "master": "硕士", "博士": "博士", "大专": "大专", "本科": "本科", "硕士": "硕士", "高中": "高中", "bachelor": "本科", "associate": "大专", "high_school": "高中"}}, {"key": "salaryMin", "nth": 0, "type": "dropdown", "match": ["薪资范围", "最低月薪"], "valueMap": {"_unit": "yuanToK"}}, {"key": "salaryMax", "nth": 1, "type": "dropdown", "match": ["薪资范围", "最高月薪"], "valueMap": {"_unit": "yuanToK"}}, {"key": "jobCategory", "type": "recommend", "match": ["职位类型"]}], "success": {"selectors": [".toast .icon-toast-success"], "timeoutMs": 120000}}',
     'https://apply.example.com/jobs/{requestNo}',
     'manual',
     'enabled',
