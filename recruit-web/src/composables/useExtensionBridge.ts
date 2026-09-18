@@ -1,5 +1,7 @@
 import { ref, onMounted, onUnmounted, type Ref } from 'vue';
 
+import { useToast } from '@/composables/useToast';
+
 /**
  * 扩展 bridge 协议类型定义（见设计文档 §5.1）
  * 
@@ -41,7 +43,8 @@ export interface FillResultPayload {
 
 export interface PublishBackPayload {
   recordId: string;
-  status: 'published' | 'failed';
+  /** background 目前仅在回填成功后广播，且不携带 status；缺省按 published 处理 */
+  status?: 'published' | 'failed';
   publishedUrl?: string;
 }
 
@@ -76,6 +79,7 @@ export function useExtensionBridge() {
   const buttonState: Ref<ButtonState> = ref('not_installed');
   const extensionVersion: Ref<string> = ref('');
   const lastHeartbeat: Ref<number> = ref(0);
+  const { success, error } = useToast();
   
   // 记录每个 recordId 的填充状态
   const fillStates = ref<Map<string, { state: ButtonState; result?: FillResultPayload }>>(new Map());
@@ -226,8 +230,13 @@ export function useExtensionBridge() {
       case 'PUBLISH_BACK': {
         const payload = message.payload as PublishBackPayload;
         fillStates.value.set(payload.recordId, { state: 'registered' });
-        
-        // 可以触发页面刷新或 toast 提示
+
+        // 发布回执提示（background 仅在回填成功后广播，status 缺省按成功处理）
+        if (payload.status === 'failed') {
+          error('BOSS 发布失败，请到「发布台账」查看详情');
+        } else {
+          success('职位已在 BOSS 发布成功，台账已登记');
+        }
         console.info('发布回执', payload);
         break;
       }

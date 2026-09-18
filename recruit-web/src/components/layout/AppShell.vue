@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAuthStore } from '@/stores/auth';
+import AppToast from '@/components/AppToast.vue';
 
 /**
  * 应用外壳：侧栏 + 顶栏（对齐原型 workbench/s1-s9 共享布局）。
@@ -191,5 +192,8 @@ function onUserClick(): void {
         </div>
       </div>
     </div>
+
+    <!-- 全局 toast（useToast() 触发） -->
+    <AppToast />
   </div>
 </template>
