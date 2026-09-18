@@ -26,6 +26,9 @@ public class Channel {
     /** 发布页 URL 匹配模式（扩展注入判定） */
     private String publishUrlPattern;
 
+    /** 发布页入口地址（扩展打开发布页用） */
+    private String publishEntryUrl;
+
     /** 字段映射配置 JSON（平台改版改数据不改扩展） */
     private String fieldMapJson;
 

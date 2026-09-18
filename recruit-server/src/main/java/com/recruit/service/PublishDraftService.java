@@ -120,16 +120,38 @@ public class PublishDraftService {
             return out;
         }
         for (int i = 0; i < fields.size(); i++) {
-            String key = fields.getJSONObject(i).getString("key");
+            JSONObject field = fields.getJSONObject(i);
+            String key = field.getString("key");
             if (key == null || !RENDER_WHITELIST.contains(key)) {
                 continue;
             }
-            Object value = resolveValue(key, request);
+            Object value = applyValueMap(field, resolveValue(key, request));
             if (value != null) {
                 out.put(key, value);
             }
         }
         return out;
+    }
+
+    /**
+     * 应用渠道 valueMap（§10 渠道映射）：
+     * - 普通映射：valueMap[原始值] -> 平台选项文本（如 education 的 bachelor -> 本科）
+     * - 单位换算：_unit=yuanToK 时元转千（15000 -> "15k"，BOSS 下拉选项为小写 k 格式）
+     * 无 valueMap 或映射未命中时原样返回。
+     */
+    private Object applyValueMap(JSONObject field, Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        JSONObject valueMap = field.getJSONObject("valueMap");
+        if (valueMap == null || valueMap.isEmpty()) {
+            return raw;
+        }
+        if ("yuanToK".equals(valueMap.getString("_unit")) && raw instanceof Number) {
+            return Math.round(((Number) raw).doubleValue() / 1000.0) + "k";
+        }
+        String mapped = valueMap.getString(String.valueOf(raw));
+        return mapped != null ? mapped : raw;
     }
 
     /** 白名单 key -> 需求字段取值（salaryText 为派生字段） */

@@ -29,6 +29,9 @@ public class ExtDraftVO {
 
     private String channelName;
 
+    /** 渠道发布页入口地址（扩展打开发布页用） */
+    private String publishEntryUrl;
+
     /** 渠道发布页 URL 匹配模式（扩展注入判定用） */
     private String publishUrlPattern;
 
@@ -49,6 +52,7 @@ public class ExtDraftVO {
                 .title(request == null ? null : request.getTitle())
                 .channelCode(channel == null ? null : channel.getCode())
                 .channelName(channel == null ? null : channel.getName())
+                .publishEntryUrl(channel == null ? null : channel.getPublishEntryUrl())
                 .publishUrlPattern(channel == null ? null : channel.getPublishUrlPattern())
                 .fieldsJson(d.getFieldsJson() == null ? null : JSONObject.parseObject(d.getFieldsJson()))
                 .fieldMapJson(channel == null || channel.getFieldMapJson() == null ? null : JSONObject.parseObject(channel.getFieldMapJson()))

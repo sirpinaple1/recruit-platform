@@ -123,6 +123,31 @@ class PublishDraftRenderTest {
     }
 
     @Test
+    @DisplayName("valueMap 应用：education/experienceYears 直接映射，salary 元转千（_unit: yuanToK）")
+    void appliesChannelValueMap() {
+        Channel channel = channel(List.of("education", "experienceYears", "salaryMin", "salaryMax"));
+        // 在占位 fieldMap 上按 BOSS 渠道真实配置叠加 valueMap（与 seed/channel_seed_boss 一致）
+        JSONObject fieldMap = JSON.parseObject(channel.getFieldMapJson());
+        for (int i = 0; i < fieldMap.getJSONArray("fields").size(); i++) {
+            JSONObject field = fieldMap.getJSONArray("fields").getJSONObject(i);
+            switch (field.getString("key")) {
+                case "education" -> field.put("valueMap", mapOf("bachelor", "本科", "master", "硕士"));
+                case "experienceYears" -> field.put("valueMap", mapOf("3", "3-5年", "5", "5-10年"));
+                case "salaryMin", "salaryMax" -> field.put("valueMap", mapOf("_unit", "yuanToK"));
+                default -> { }
+            }
+        }
+        channel.setFieldMapJson(fieldMap.toJSONString());
+
+        Map<String, Object> rendered = renderDraft(fullRequest(), channel);
+
+        assertThat(rendered.get("education")).as("bachelor 应映射为平台选项文本").isEqualTo("本科");
+        assertThat(rendered.get("experienceYears")).as("数字 3 应映射为平台选项文本").isEqualTo("3-5年");
+        assertThat(rendered.get("salaryMin")).as("15000 元应渲染为 15k").isEqualTo("15k");
+        assertThat(rendered.get("salaryMax")).as("25000 元应渲染为 25k").isEqualTo("25k");
+    }
+
+    @Test
     @DisplayName("深链实例化：{requestNo} 占位被替换为需求编号")
     void instantiatesDeepLinkPlaceholder() {
         PublishDraft draft = firstDraft(fullRequest(), channel(List.of("title")));
@@ -200,6 +225,15 @@ class PublishDraftRenderTest {
         return Stream.of(EXPECTED_PUBLIC_FIELDS, RESOLVABLE_INTERNAL_FIELDS, NON_EXISTENT_KEYS)
                 .flatMap(Collection::stream)
                 .toList();
+    }
+
+    /** 偶数个参数构造 JSONObject（fastjson2 版本无 JSON.of） */
+    private JSONObject mapOf(String... kv) {
+        JSONObject o = new JSONObject();
+        for (int i = 0; i + 1 < kv.length; i += 2) {
+            o.put(kv[i], kv[i + 1]);
+        }
+        return o;
     }
 
     private Channel channel(List<String> declaredKeys) {
