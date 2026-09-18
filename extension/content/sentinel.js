@@ -1,20 +1,33 @@
 /**
  * 哨兵脚本：监听平台发布成功信号（Phase 2 §6）
- * 
+ *
  * 职责：
  * 1. 在填充任务完成后由 background 注入到平台页（如 BOSS）
  * 2. 监听成功信号（URL 变化 + CSS 选择器）
- * 3. 检测到成功后调用 POST /api/ext/records/{id}/report 回填
- * 4. 向中台 tab 广播 PUBLISH_BACK 消息
- * 
+ * 3. 检测到成功后通过 SENTINEL_REPORT 消息交给 background 代理回填
+ *    （POST /api/ext/records/{id}/report），再由 background 广播
+ *    PUBLISH_BACK 给中台 tab
+ *
+ * 为什么不在本脚本里直接 fetch 回填接口：
+ *   a) content script 的 fetch 以页面 origin 发起（BOSS 页 → localhost:6017
+ *      跨域 + X-Extension-Token 自定义头触发预检），会被浏览器 CORS 拦截；
+ *      background worker 持有 host_permissions，不受此限。
+ *   b) 平台发布成功后约 1s 页面即跳转列表页，会中断页面内未完成的 fetch；
+ *      worker 的生命周期独立于页面导航，回填不丢。
+ *
  * 配置来源：field_map_json.success
  * {
- *   "urlPattern": "**/job/**",  // URL 需匹配的模式（简单通配符）
+ *   "urlPattern": "URL 模式（** 匹配任意，* 匹配非斜杠），可选",
  *   "selectors": [".publish-success", ".job-published-tip"],  // CSS 选择器列表
  *   "timeoutMs": 60000  // 超时时间（默认 60 秒）
  * }
- * 
- * 策略：保守双命中（URL 变化 + 选择器出现）
+ *
+ * ⚠️ 本文件的块注释中禁止书写「两个星号紧跟斜杠」的通配符示例（URL 模式
+ *    通配符的常见写法）——其中末位星号与斜杠组合会终结块注释，使后续注释
+ *    文本变成代码，脚本注入即抛 ReferenceError（node --check 无法检出，
+ *    只在运行时炸）。需要示例时用文字描述代替。
+ *
+ * 策略：保守双命中（URL 变化 + 选择器出现；任一方无配置则跳过该方判定）
  */
 'use strict';
 
@@ -35,7 +48,7 @@ if (window[SENTINEL_ID]) {
 }
 
 function startSentinel(config) {
-  const { recordId, successConfig, apiBase, token, platformTabId } = config;
+  const { recordId, successConfig, platformTabId } = config;
   
   if (!recordId || !successConfig) {
     console.error('[Sentinel] 配置不完整:', config);
@@ -103,50 +116,27 @@ function startSentinel(config) {
     }
   }
   
-  // 调用后端 report 接口
+  // 上报成功信号（background 代理回填，见头部注释）
   async function reportSuccess() {
     const publishedUrl = window.location.href;
-    console.log('[Sentinel] 回填发布成功, publishedUrl:', publishedUrl);
-    
+    console.log('[Sentinel] 成功信号命中，上报 background 代理回填:', publishedUrl);
+
     try {
-      const resp = await fetch(`${apiBase}/api/ext/records/${recordId}/report`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Extension-Token': token,
-        },
-        body: JSON.stringify({
-          status: 'published',
-          publishedUrl,
-        }),
-      });
-      
-      if (!resp.ok) {
-        const text = await resp.text();
-        console.error('[Sentinel] 回填失败:', resp.status, text);
-        return;
-      }
-      
-      const data = await resp.json();
-      if (data.code !== 200) {
-        console.error('[Sentinel] 回填失败:', data.message);
-        return;
-      }
-      
-      console.log('[Sentinel] 回填成功');
-      
-      // 通知 background，让它广播给中台 tab
-      chrome.runtime.sendMessage({
-        type: 'SENTINEL_SUCCESS',
+      const resp = await chrome.runtime.sendMessage({
+        type: 'SENTINEL_REPORT',
         payload: {
           recordId,
           publishedUrl,
           platformTabId,
         },
       });
-      
+      if (!resp || !resp.ok) {
+        console.error('[Sentinel] 回填失败:', (resp && resp.error) || 'background 无响应');
+      } else {
+        console.log('[Sentinel] 回填成功');
+      }
     } catch (e) {
-      console.error('[Sentinel] 回填异常:', e);
+      console.error('[Sentinel] 上报异常:', e);
     }
   }
   

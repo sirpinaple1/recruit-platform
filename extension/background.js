@@ -27,6 +27,20 @@ const FILL_WAIT_FRAME_MS = 12000;
 /** 等待引擎产出结果的上限（引擎含下拉/推荐弹层等待，整体可达 15s+） */
 const FILL_WAIT_RESULT_MS = 25000;
 
+/** FILL_REQUEST 去重窗口：同 recordId 在窗口内只处理一次（防消息重复转发开双 tab） */
+const FILL_DEDUP_MS = 20000;
+const fillRecent = new Map(); // recordId -> 上次受理时间戳
+
+function isDuplicateFill(recordId) {
+  const now = Date.now();
+  for (const [k, t] of fillRecent) {
+    if (now - t > FILL_DEDUP_MS) fillRecent.delete(k);
+  }
+  if (fillRecent.has(recordId)) return true;
+  fillRecent.set(recordId, now);
+  return false;
+}
+
 // ============ 零配置授权 ============
 
 /**
@@ -74,6 +88,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false, error: 'recordId is required' });
       return false;
     }
+    if (isDuplicateFill(String(recordId))) {
+      console.warn('[Background] FILL_REQUEST 重复（' + FILL_DEDUP_MS + 'ms 窗口内），忽略:', recordId);
+      sendResponse({ ok: true, deduped: true });
+      return false;
+    }
     
     handleFillRequest(recordId, sender.tab?.id)
       .then(() => sendResponse({ ok: true }))
@@ -84,26 +103,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // 异步回复
   }
   
-  // Phase 2.6: 哨兵成功回调（来自 sentinel.js）
-  if (msg && msg.type === 'SENTINEL_SUCCESS') {
-    console.log('[Background] 收到 SENTINEL_SUCCESS:', msg.payload);
+  // Phase 2.6: 哨兵成功上报（来自 sentinel.js）
+  // 由本 worker 代理调用回填接口（content script 的跨域 fetch 会被 CORS 拦截，
+  // 且平台发布成功后页面约 1s 即跳转、会中断页面内未完成的 fetch），
+  // 成功后广播 PUBLISH_BACK 给中台 tab
+  if (msg && msg.type === 'SENTINEL_REPORT') {
+    console.log('[Background] 收到 SENTINEL_REPORT:', msg.payload);
     const { recordId, publishedUrl, platformTabId } = msg.payload || {};
-    
-    // 广播 PUBLISH_BACK 给中台 tab
-    if (platformTabId) {
-      sendMessageToTab(platformTabId, {
-        type: 'PUBLISH_BACK',
-        source: 'recruit-extension',
-        payload: {
-          recordId,
-          publishedUrl,
-          timestamp: Date.now(),
-        },
+
+    reportPublishSuccess(recordId, publishedUrl)
+      .then(() => {
+        // 广播 PUBLISH_BACK 给中台 tab
+        if (platformTabId) {
+          sendMessageToTab(platformTabId, {
+            type: 'PUBLISH_BACK',
+            source: 'recruit-extension',
+            payload: {
+              recordId,
+              publishedUrl,
+              timestamp: Date.now(),
+            },
+          });
+        }
+        sendResponse({ ok: true });
+      })
+      .catch((e) => {
+        console.error('[Background] 哨兵回填失败:', e);
+        sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
       });
-    }
-    
-    sendResponse({ ok: true });
-    return false;
+    return true; // 异步回复
   }
 });
 
@@ -329,8 +357,43 @@ async function sendMessageToTab(tabId, message) {
 }
 
 /**
+ * Phase 2.6: 代理哨兵调用回填接口
+ * content script 在平台页 origin 下 fetch 中台 API 会被 CORS 拦截，且平台发布
+ * 成功后页面约 1s 即跳转列表页会中断未完成的 fetch——由本 worker（持有
+ * host_permissions、生命周期独立于页面导航）代理执行。
+ */
+async function reportPublishSuccess(recordId, publishedUrl) {
+  const stored = await chrome.storage.local.get(['ext_token']);
+  const token = stored.ext_token;
+  if (!token) throw new Error('未找到扩展 token，无法回填');
+
+  const resp = await fetch(`${API_BASE}/api/ext/records/${recordId}/report`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Extension-Token': token,
+    },
+    body: JSON.stringify({
+      status: 'published',
+      publishedUrl,
+    }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`回填接口失败 (${resp.status}): ${text}`);
+  }
+
+  const data = await resp.json();
+  if (data.code !== 200) {
+    throw new Error(`回填失败: ${data.message || '未知错误'}`);
+  }
+  console.log('[Background] 哨兵回填成功, recordId:', recordId);
+}
+
+/**
  * Phase 2.6: 注入哨兵脚本到填充完成的平台页
- * 
+ *
  * @param {number} targetTabId - 填充完成的平台页 tabId
  * @param {string} recordId - 发布记录 ID
  * @param {object} successConfig - 成功信号配置 { urlPattern, selectors, timeoutMs }
@@ -338,16 +401,8 @@ async function sendMessageToTab(tabId, message) {
  */
 async function injectSentinel(targetTabId, recordId, successConfig, platformTabId) {
   console.log('[Background] 准备注入哨兵, targetTabId:', targetTabId, 'recordId:', recordId);
-  
-  // 1. 获取 ext_token（用于哨兵回填接口）
-  const stored = await chrome.storage.local.get(['ext_token']);
-  const token = stored.ext_token;
-  if (!token) {
-    console.error('[Background] 哨兵注入失败：未找到 ext_token');
-    return;
-  }
-  
-  // 2. 构造哨兵配置
+
+  // 1. 构造哨兵配置（回填 fetch 由 background 代理，无需下发 token）
   const sentinelConfig = {
     recordId,
     successConfig: {
@@ -355,12 +410,10 @@ async function injectSentinel(targetTabId, recordId, successConfig, platformTabI
       selectors: successConfig.selectors || [],
       timeoutMs: successConfig.timeoutMs || 60000,
     },
-    apiBase: API_BASE,
-    token,
     platformTabId,
   };
-  
-  // 3. 注入配置到目标页面的 window
+
+  // 2. 注入配置到目标页面的 window
   try {
     await chrome.scripting.executeScript({
       target: { tabId: targetTabId },
@@ -374,8 +427,8 @@ async function injectSentinel(targetTabId, recordId, successConfig, platformTabI
     console.error('[Background] 哨兵配置注入失败:', e);
     return;
   }
-  
-  // 4. 注入哨兵脚本
+
+  // 3. 注入哨兵脚本
   try {
     await chrome.scripting.executeScript({
       target: { tabId: targetTabId },
@@ -402,8 +455,9 @@ async function runFillTask(d) {
   if (!pattern) throw new Error('该渠道未配置发布页匹配模式（publish_url_pattern）');
   if (pattern.includes('*')) throw new Error('通配发布页模式需先手动打开对应页面');
 
-  // 1. 后台开 tab（不打扰当前焦点；填充完成后切前台）
-  const tab = await chrome.tabs.create({ url: entryUrl, active: false });
+  // 1. 前台开 tab：引擎大量依赖 setTimeout 等待级联渲染/推荐流程，后台 tab 会被
+  //    Chrome 定时器节流（隐藏 5 分钟后每分钟仅 1 次定时器），流程会被拖死
+  const tab = await chrome.tabs.create({ url: entryUrl, active: true });
   await waitTabComplete(tab.id);
 
   // 2. 轮询等任一 frame 出现表单控件（避免注到尚未建立的 frame）
@@ -456,7 +510,7 @@ async function runFillTask(d) {
     await sleep(400);
   }
 
-  // 5. 报告落 storage + 把发布页切到前台（此时填充已完成，切前台无副作用）
+  // 5. 报告落 storage（tab 创建时已在前台，无需再切）
   const report = {
     recordId: d.recordId || null,
     requestNo: d.requestNo || '',
@@ -466,7 +520,6 @@ async function runFillTask(d) {
     result,
   };
   await chrome.storage.local.set({ lastFillReport: report });
-  await chrome.tabs.update(tab.id, { active: true });
   return report;
 }
 
