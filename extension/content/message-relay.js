@@ -23,8 +23,10 @@ window.addEventListener('message', (event) => {
   
   const msg = event.data;
   
-  // 过滤：只转发招聘扩展的消息（接受 bridge 和 platform 两种来源）
-  if (!msg || (msg.source !== 'recruit-bridge' && msg.source !== 'recruit-platform')) return;
+  // 过滤：只转发 bridge 重发过的消息。页面原始消息（source='recruit-platform'）由
+  // bridge.js 接收并以 source='recruit-bridge' 重发；若此处也接受原始来源，同一条
+  // FILL_REQUEST 会被转发两次，background 会开两个 tab（2026-09-18 双开修复）。
+  if (!msg || msg.source !== 'recruit-bridge') return;
   
   // Phase 1: 零配置授权
   if (msg.type === 'RECRUIT_SESSION_DETECTED') {

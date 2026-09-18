@@ -180,10 +180,8 @@ async function fillDraft(d, ui) {
       target: { tabId: tab.id },
       files: ['content/fill-engine.js'],
     });
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.__RECRUIT_FILL_RESULT__,
-    });
+    // 引擎为异步顺序填充（下拉点选/推荐等待需数秒），轮询结果而非单次读取
+    const result = await pollFillResult(tab.id, 30000);
     renderFillReport(ui.reportEl, result);
     if (result && result.summary && result.summary.failed === 0 && result.summary.filled > 0) {
       ui.btnPublished.hidden = false;
@@ -195,6 +193,24 @@ async function fillDraft(d, ui) {
   } finally {
     ui.btnFill.disabled = false;
   }
+}
+
+/** 轮询页面上的填充结果（引擎异步顺序填充，完成后落 __RECRUIT_FILL_RESULT__） */
+async function pollFillResult(tabId, timeoutMs) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    try {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => window.__RECRUIT_FILL_RESULT__,
+      });
+      if (result && result.summary) return result;
+    } catch {
+      // tab 可能正在导航，继续轮询
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return null;
 }
 
 function renderFillReport(reportEl, result) {
