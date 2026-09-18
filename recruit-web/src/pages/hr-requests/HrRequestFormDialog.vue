@@ -95,7 +95,11 @@ function num(v: string | number): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : Number.NaN;
 }
 
-function toPayload(): HrRequestSavePayload {
+/**
+ * 构造提交载荷。必填字段空值（null）不在类型层收窄，交由
+ * HrRequestSavePayloadSchema.safeParse 统一拦截并给出友好提示。
+ */
+function toPayload() {
   return {
     title: form.value.title.trim(),
     deptName: form.value.deptName.trim(),
@@ -170,11 +174,11 @@ async function save(): Promise<void> {
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">月薪下限（元）</label>
+            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">月薪下限（元） <span class="text-danger">*</span></label>
             <input v-model="form.salaryMin" type="number" min="0" class="h-9 w-full rounded-md border border-line px-3 text-[13px] focus:border-primary focus:outline-none" placeholder="15000" />
           </div>
           <div>
-            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">月薪上限（元）</label>
+            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">月薪上限（元） <span class="text-danger">*</span></label>
             <input v-model="form.salaryMax" type="number" min="0" class="h-9 w-full rounded-md border border-line px-3 text-[13px] focus:border-primary focus:outline-none" placeholder="25000" />
           </div>
         </div>
@@ -185,16 +189,16 @@ async function save(): Promise<void> {
             <input v-model="form.location" class="h-9 w-full rounded-md border border-line px-3 text-[13px] focus:border-primary focus:outline-none" placeholder="如：深圳" />
           </div>
           <div>
-            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">要求工作年限</label>
+            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">要求工作年限 <span class="text-danger">*</span></label>
             <input v-model="form.experienceYears" type="number" min="0" class="h-9 w-full rounded-md border border-line px-3 text-[13px] focus:border-primary focus:outline-none" placeholder="如：3" />
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">学历要求</label>
+            <label class="mb-1.5 block text-[12.5px] font-medium text-t2">学历要求 <span class="text-danger">*</span></label>
             <select v-model="form.education" class="h-9 w-full rounded-md border border-line bg-white px-3 text-[13px] focus:border-primary focus:outline-none">
-              <option value="">不限</option>
+              <option value="" disabled>请选择</option>
               <option v-for="o in EDUCATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
             </select>
           </div>
@@ -210,6 +214,7 @@ async function save(): Promise<void> {
         <div>
           <label class="mb-1.5 block text-[12.5px] font-medium text-t2">JD 正文 <span class="text-danger">*</span></label>
           <textarea v-model="form.jobDescription" rows="6" class="w-full rounded-md border border-line px-3 py-2 text-[13px] leading-relaxed focus:border-primary focus:outline-none" placeholder="岗位职责、工作内容等公开信息（将用于渠道发布预填充）"></textarea>
+          <p class="mt-1 text-[11.5px] leading-relaxed text-t4">描述越具体（岗位职责、技术栈、年限要求），发布时渠道的职位类型推荐越准确；过于简短可能不触发平台推荐，至少 30 字。</p>
         </div>
 
         <div>

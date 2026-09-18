@@ -50,18 +50,36 @@ export type HrRequestPage = z.infer<typeof HrRequestPageSchema>;
 export const EmploymentTypeSchema = z.enum(['full_time', 'part_time', 'internship', 'contract']);
 export type EmploymentType = z.infer<typeof EmploymentTypeSchema>;
 
-/** 建单 / 编辑载荷（可选数字字段传 null 表示不覆盖） */
+/**
+ * 建单 / 编辑载荷。
+ * 必填对齐渠道发布页（BOSS）必填项：经验 / 学历 / 薪资范围不可为空——
+ * 缺值会渲染出残缺草稿，渠道填充必然失败。
+ */
 export const HrRequestSavePayloadSchema = z.object({
   title: z.string().min(1, '岗位名称不能为空').max(128, '岗位名称不能超过 128 字'),
   deptName: z.string().min(1, '用人部门不能为空').max(64, '用人部门不能超过 64 字'),
   headcountTotal: z.number().int().min(1, '招聘人数至少为 1'),
-  jobDescription: z.string().min(1, 'JD 正文不能为空'),
+  jobDescription: z
+    .string()
+    .min(30, 'JD 描述过于简短（至少 30 字）：描述越具体，发布时渠道的职位类型推荐越准确'),
   jobRequirement: z.string().max(65535).nullable(),
-  salaryMin: z.number().int().min(0, '薪资下限不能为负数').nullable(),
-  salaryMax: z.number().int().min(0, '薪资上限不能为负数').nullable(),
+  salaryMin: z
+    .number({ invalid_type_error: '薪资范围（下限）不能为空' })
+    .int()
+    .min(0, '薪资下限不能为负数'),
+  salaryMax: z
+    .number({ invalid_type_error: '薪资范围（上限）不能为空' })
+    .int()
+    .min(0, '薪资上限不能为负数'),
   location: z.string().max(128).nullable(),
-  education: z.string().max(32).nullable(),
-  experienceYears: z.number().int().min(0, '工作年限不能为负数').nullable(),
+  education: z
+    .string({ invalid_type_error: '学历要求不能为空' })
+    .min(1, '学历要求不能为空')
+    .max(32),
+  experienceYears: z
+    .number({ invalid_type_error: '要求工作年限不能为空' })
+    .int()
+    .min(0, '工作年限不能为负数'),
   employmentType: EmploymentTypeSchema.nullable(),
   autoClose: z.boolean().nullable(),
 });
