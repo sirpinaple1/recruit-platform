@@ -19,11 +19,24 @@ SELECT IF(
 ) AS precheck;
 
 -- candidate -> _legacy_candidate
+--
+-- ⚠️ 2026-09-21 补丁：本脚本原有的「原名存在 且 目标名不存在」条件，在**全新环境**下会成立，
+--    而新版「简历采集」已在 sql/candidate_create_20260921_V1.sql 里**重新启用 candidate 这个表名**，
+--    于是全新环境执行本脚本会把现行表改名冻结掉（数据不丢，但表名被夺走，应用直接报错）。
+--    故补一条判定：目标表若含新设计的标记列 platform_user_id，则认定它是现行表，拒绝改名并打印提示。
+--    存量环境不受影响（_legacy_candidate 已存在，原条件本就不成立）。
 SET @src := 'candidate'; SET @dst := '_legacy_candidate';
-SET @sql := IF(
-    (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = @src) = 1
-    AND (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = @dst) = 0,
-    CONCAT('RENAME TABLE `', @src, '` TO `', @dst, '`'), 'DO 0');
+SET @src_exists := (SELECT COUNT(*) FROM information_schema.TABLES
+                    WHERE table_schema = DATABASE() AND table_name = @src);
+SET @dst_exists := (SELECT COUNT(*) FROM information_schema.TABLES
+                    WHERE table_schema = DATABASE() AND table_name = @dst);
+SET @is_new_design := (SELECT COUNT(*) FROM information_schema.COLUMNS
+                       WHERE table_schema = DATABASE() AND table_name = @src
+                         AND column_name = 'platform_user_id');
+SET @sql := IF(@src_exists = 1 AND @dst_exists = 0 AND @is_new_design > 0,
+    'SELECT ''【已跳过】candidate 是现行「简历采集」表（含 platform_user_id），不改名'' AS note',
+    IF(@src_exists = 1 AND @dst_exists = 0,
+        CONCAT('RENAME TABLE `', @src, '` TO `', @dst, '`'), 'DO 0'));
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- candidate_resume -> _legacy_candidate_resume
