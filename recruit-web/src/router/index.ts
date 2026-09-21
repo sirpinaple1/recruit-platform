@@ -39,6 +39,11 @@ const router = createRouter({
       component: () => import('@/pages/publish-records/PublishRecordListPage.vue'),
     },
     {
+      path: '/candidates',
+      name: 'candidates',
+      component: () => import('@/pages/candidates/CandidateListPage.vue'),
+    },
+    {
       // 扩展授权可访问全量待发布草稿，限管理员
       path: '/extension-tokens',
       name: 'extension-tokens',

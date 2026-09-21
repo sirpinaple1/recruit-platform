@@ -46,7 +46,7 @@ interface NavItem {
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { name: 'workbench', label: '工作台', icon: 'M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z' },
   { name: 'hr-requests', label: '职位', icon: 'M2 5h12v9H2zM6 5V3.6A1.6 1.6 0 0 1 7.6 2h.8A1.6 1.6 0 0 1 10 3.6V5M2 8.6h12' },
-  { name: 'candidates', label: '候选人', icon: 'M8.8 8.2a2.4 2.4 0 1 0-4.8 0 2.4 2.4 0 0 0 4.8 0zM2.2 13.4c0-2.2 1.9-3.6 4.2-3.6s4.2 1.4 4.2 3.6M10.6 4.1a2.4 2.4 0 0 1 0 4.4M12 10c1.2.5 1.8 1.7 1.8 3.4', disabled: true },
+  { name: 'candidates', label: '候选人', icon: 'M8.8 8.2a2.4 2.4 0 1 0-4.8 0 2.4 2.4 0 0 0 4.8 0zM2.2 13.4c0-2.2 1.9-3.6 4.2-3.6s4.2 1.4 4.2 3.6M10.6 4.1a2.4 2.4 0 0 1 0 4.4M12 10c1.2.5 1.8 1.7 1.8 3.4' },
   { name: 'interviews', label: '面试', icon: 'M2 3.5h12V14H2zM2 6.8h12M5.5 2v3M10.5 2v3', disabled: true },
   { name: 'analytics', label: '数据', icon: 'M2 13.5h12M4.2 11.4V8.6M8 11.4V5.4M11.8 11.4V9.6', disabled: true },
   { name: 'channels', label: '渠道管理', icon: 'M2 3h12v10H2zM2 6.5h12M5 6.5v6.5', adminOnly: true },
