@@ -16,8 +16,9 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * 扩展端独立鉴权拦截器（见设计文档 §6.2）：
- * 请求头 X-Extension-Token: <token> -> SHA-256 命中且 active 放行（并刷 last_used_at），
- * 否则 401。通过后挂 extUserId 供 Controller 记录 operated_by。
+ * 请求头 X-Extension-Token: &lt;token&gt; -&gt; SHA-256 命中且 active 放行（并刷 last_used_at），
+ * 否则 401。通过后挂 extUserId 供 Controller 记录 operated_by，
+ * 并挂 extTokenId 供采集审计记录授权来源（token 泄露时用于溯源定位到具体授权）。
  */
 @RequiredArgsConstructor
 @Component
@@ -38,6 +39,7 @@ public class ExtensionAuthInterceptor implements HandlerInterceptor {
             return reject(response);
         }
         request.setAttribute("extUserId", verified.getUserId());
+        request.setAttribute("extTokenId", verified.getId());
         return true;
     }
 

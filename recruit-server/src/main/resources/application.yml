@@ -19,6 +19,11 @@ spring:
   jackson:
     time-zone: UTC
     date-format: yyyy-MM-dd HH:mm:ss
+  # 附件上传上限（简历 PDF 实测 130–220KB 量级；20MB 是防误传大文件的护栏）
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
 
 mybatis-plus:
   # Mapper XML 存放位置
@@ -32,3 +37,10 @@ mybatis-plus:
       # 主键用雪花 ID（BIGINT UNSIGNED，见 README 数据约定）
       id-type: assign_id
       table-underline: true
+
+# 附件本地存储（Phase 1 简历采集）
+# 目录结构 <root>/<platform>/<yyyyMM>/<file>，启动时自动创建，不可写会直接启动失败。
+# Phase 2 若切 MinIO，替换 AttachmentStorageService 的实现即可，调用方不动。
+app:
+  storage:
+    attachment-root: ${ATTACHMENT_ROOT:./data/attachments}
