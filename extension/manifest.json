@@ -1,17 +1,20 @@
 {
   "manifest_version": 3,
   "name": "招聘发布助手",
-  "version": "0.1.0",
-  "description": "渠道发布中台浏览器扩展：拉取待发布草稿、一键填充发布页、回填发布结果",
+  "version": "0.2.2",
+  "description": "渠道发布中台浏览器扩展：拉取待发布草稿、一键填充发布页、回填发布结果；简历采集（逐条主动采集候选人简历入库，附件支持无预览主动探测）",
   "permissions": [
     "storage",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "webRequest"
   ],
   "host_permissions": [
     "http://localhost:6017/*",
     "http://localhost:5176/*",
-    "https://www.zhipin.com/*"
+    "https://www.zhipin.com/*",
+    "http://*.zhipin.com/*",
+    "https://*.zhipin.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -37,6 +40,48 @@
         "content/sentinel.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.zhipin.com/web/chat/*",
+        "https://www.zhipin.com/web/frame/recommend/*",
+        "https://www.zhipin.com/web/frame/c-resume/*",
+        "https://www.zhipin.com/bzl-office/pdf-viewer-b*"
+      ],
+      "js": [
+        "content/collect-bridge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "ISOLATED"
+    },
+    {
+      "matches": [
+        "https://www.zhipin.com/web/chat/*",
+        "https://www.zhipin.com/web/frame/recommend/*",
+        "https://www.zhipin.com/web/frame/c-resume/*",
+        "https://www.zhipin.com/bzl-office/pdf-viewer-b*"
+      ],
+      "js": [
+        "content/collect-hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.zhipin.com/web/chat/*",
+        "https://www.zhipin.com/web/frame/recommend/*",
+        "https://www.zhipin.com/web/frame/c-resume/*",
+        "https://www.zhipin.com/bzl-office/pdf-viewer-b*"
+      ],
+      "js": [
+        "content/collect-button.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "world": "ISOLATED"
     }
   ],
   "options_ui": {
