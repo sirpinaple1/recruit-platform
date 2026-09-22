@@ -4,9 +4,11 @@ import { onMounted, ref, watch } from 'vue';
 import AppShell from '@/components/layout/AppShell.vue';
 import CandidateDetailDialog from '@/pages/candidates/CandidateDetailDialog.vue';
 import { fetchCandidatePage } from '@/lib/api/candidate.api';
+import { fetchHrRequestPage } from '@/lib/api/hr-request.api';
 import { ApiError } from '@/lib/httpClient';
 import { cn, formatUtcIso } from '@/lib/utils';
-import { SOURCE_CHANNEL_LABELS, type CandidateVO } from '@/types/candidate.types';
+import { RECOMMENDATION_LABELS, SCORE_TYPE_LABELS, SOURCE_CHANNEL_LABELS, type CandidateVO } from '@/types/candidate.types';
+import type { HrRequestVO } from '@/types/hr-request.types';
 
 /**
  * 候选人库：简历采集链路的事实来源。
@@ -14,9 +16,15 @@ import { SOURCE_CHANNEL_LABELS, type CandidateVO } from '@/types/candidate.types
  * 采集是「HR 在 BOSS 页面逐条主动点击」产生的（框架 §6 红线第 1 条），
  * 本页只读展示，不提供批量操作入口 —— 页面上一旦有批量按钮，
  * 采集行为就会从「逐条可审计」滑向「批量抓取」。
+ *
+ * 「投递职位」一列与「按职位筛选」是候选人 ↔ 职位关联的**可见出口**：
+ * 关联对不对，只能靠人在这里看（未归类显示平台原文提示，归类后显示岗位名）。
  */
 
 const PAGE_SIZE = 10;
+
+/** 职位筛选下拉的可选值（需求单，抓取量按一期规模取一页上限） */
+const REQUEST_OPTION_LIMIT = 100;
 
 const rows = ref<CandidateVO[]>([]);
 const total = ref(0);
@@ -26,6 +34,9 @@ const errorMsg = ref('');
 
 const keyword = ref('');
 const sourceChannelFilter = ref('');
+const requestFilter = ref('');
+/** 职位筛选下拉数据源；加载失败不阻塞页面（退化为「全部职位」一个选项） */
+const requestOptions = ref<HrRequestVO[]>([]);
 
 const detailId = ref<string | null>(null);
 
@@ -34,6 +45,21 @@ function sourceChipClass(source: string | null): string {
     'rounded px-2 py-0.5 text-[11.5px] font-medium',
     source === 'recommend' ? 'bg-[#EEF1FF] text-[#4F46E5]' : 'bg-[#EAF6EF] text-[#12A150]',
   );
+}
+
+/** 匹配度着色：≥75 绿 / 60-74 橙 / <60 红（口径与详情打分卡一致） */
+function scoreColor(score: number): string {
+  if (score >= 75) return 'text-[#12A150]';
+  if (score >= 60) return 'text-[#B8730E]';
+  return 'text-[#D83931]';
+}
+
+/** 分数下的小标签：match 优先展示推荐结论，其余展示打分类型 */
+function scoreSubLabel(row: CandidateVO): string {
+  if (row.latestScoreType === 'match' && row.latestRecommendation) {
+    return RECOMMENDATION_LABELS[row.latestRecommendation] ?? row.latestRecommendation;
+  }
+  return SCORE_TYPE_LABELS[row.latestScoreType ?? ''] ?? '';
 }
 
 async function load(): Promise<void> {
@@ -45,6 +71,7 @@ async function load(): Promise<void> {
       size: PAGE_SIZE,
       keyword: keyword.value.trim() || undefined,
       sourceChannel: sourceChannelFilter.value || undefined,
+      requestId: requestFilter.value || undefined,
     });
     rows.value = page.records;
     total.value = page.total;
@@ -56,8 +83,24 @@ async function load(): Promise<void> {
   }
 }
 
+/** 职位下拉数据：一次取一页（一期规模够用）。失败只记警告，不让筛选器把整页拖挂 */
+async function loadRequestOptions(): Promise<void> {
+  try {
+    const page = await fetchHrRequestPage({ page: 1, size: REQUEST_OPTION_LIMIT });
+    requestOptions.value = page.records;
+  } catch {
+    requestOptions.value = [];
+  }
+}
+
 /** 来源渠道切换：回到第 1 页并服务端重查 */
 watch(sourceChannelFilter, () => {
+  current.value = 1;
+  void load();
+});
+
+/** 职位切换：同样服务端重查（该筛选在服务端按投递表过滤，不能客户端过滤） */
+watch(requestFilter, () => {
   current.value = 1;
   void load();
 });
@@ -86,6 +129,7 @@ function openDetail(row: CandidateVO): void {
 
 onMounted(() => {
   void load();
+  void loadRequestOptions();
 });
 </script>
 
@@ -115,6 +159,16 @@ onMounted(() => {
         <option value="chat">候选人主动来</option>
         <option value="recommend">我方主动发</option>
       </select>
+      <!-- 按职位筛选：语义是「投递过该职位」，用于看某个岗位下的候选人池 -->
+      <select
+        v-model="requestFilter"
+        class="h-[34px] max-w-[220px] cursor-pointer rounded-md border border-line bg-white pl-3 pr-8 text-[12.5px] text-t2 focus:border-primary focus:outline-none"
+      >
+        <option value="">全部职位</option>
+        <option v-for="r in requestOptions" :key="r.id" :value="r.id">
+          {{ r.title }}{{ r.requestNo ? `（${r.requestNo}）` : '' }}
+        </option>
+      </select>
       <button
         class="h-[34px] rounded-md border border-line bg-white px-3 text-[12.5px] text-t2 transition hover:bg-hover"
         @click="search"
@@ -128,9 +182,11 @@ onMounted(() => {
 
     <!-- 表格卡片 -->
     <div class="overflow-hidden rounded-lg border border-line bg-white">
-      <div class="grid grid-cols-[140px_140px_120px_130px_1.3fr_90px_90px_120px] items-center border-b border-divider bg-[#FAFBFC] px-5 py-2.5 text-[11.5px] font-medium text-t3">
+      <div class="grid grid-cols-[140px_130px_150px_90px_120px_130px_1.3fr_80px_80px_120px] items-center border-b border-divider bg-[#FAFBFC] px-5 py-2.5 text-[11.5px] font-medium text-t3">
         <div>候选人</div>
         <div>来源渠道</div>
+        <div>投递职位</div>
+        <div>匹配度</div>
         <div>期望职位</div>
         <div>期望薪资</div>
         <div>学历 / 院校</div>
@@ -148,7 +204,7 @@ onMounted(() => {
       <div
         v-for="row in rows"
         :key="row.id"
-        class="grid min-h-16 cursor-pointer grid-cols-[140px_140px_120px_130px_1.3fr_90px_90px_120px] items-center gap-3 border-b border-divider px-5 text-[13px] text-t2 transition last:border-b-0 hover:bg-[#FAFBFC]"
+        class="grid min-h-16 cursor-pointer grid-cols-[140px_130px_150px_90px_120px_130px_1.3fr_80px_80px_120px] items-center gap-3 border-b border-divider px-5 text-[13px] text-t2 transition last:border-b-0 hover:bg-[#FAFBFC]"
         @click="openDetail(row)"
       >
         <div class="min-w-0">
@@ -163,6 +219,36 @@ onMounted(() => {
           <span :class="sourceChipClass(row.sourceChannel)">
             {{ SOURCE_CHANNEL_LABELS[row.sourceChannel ?? ''] ?? '—' }}
           </span>
+        </div>
+        <!-- 投递职位：已归类显示岗位名；未归类显示平台原文提示，让 HR 能认出是哪个岗 -->
+        <div class="min-w-0">
+          <template v-if="row.requestTitle">
+            <div class="truncate text-[12.5px] text-t2">{{ row.requestTitle }}</div>
+            <div v-if="(row.applicationCount ?? 0) > 1" class="mt-0.5 text-[11px] text-t4">
+              共投递 {{ row.applicationCount }} 个岗位
+            </div>
+          </template>
+          <template v-else-if="row.platformJobId">
+            <div class="truncate text-[12.5px] text-warning">未归类</div>
+            <div class="mt-0.5 truncate text-[11px] text-t4" :title="row.platformJobHint ?? ''">
+              {{ row.platformJobHint ?? `岗位 ${row.platformJobId}` }}
+            </div>
+          </template>
+          <template v-else>
+            <span class="text-[12.5px] text-t4" title="该候选人的采集响应里没有岗位线索">无岗位线索</span>
+          </template>
+        </div>
+        <!-- 匹配度：最新一次成功打分。null = 尚无成功打分（未打/打分中/失败），详情弹窗里可看明细与重打 -->
+        <div class="min-w-0">
+          <template v-if="row.latestScore != null">
+            <div class="text-[14px] font-semibold" :class="scoreColor(row.latestScore)">
+              {{ row.latestScore }}
+            </div>
+            <div class="mt-0.5 truncate text-[11px] text-t4">{{ scoreSubLabel(row) }}</div>
+          </template>
+          <template v-else>
+            <span class="text-[12.5px] text-t4">—</span>
+          </template>
         </div>
         <div class="min-w-0 truncate text-[12.5px] text-t3">{{ row.currentTitle ?? '—' }}</div>
         <div class="min-w-0 truncate text-[12.5px] text-t3">{{ row.expectSalary ?? '—' }}</div>

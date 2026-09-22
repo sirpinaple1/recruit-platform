@@ -29,7 +29,23 @@ export const CandidateVOSchema = z.object({
   sourceChannel: z.string().nullable(),
   versionCount: z.number().nullable(),
   attachmentCount: z.number().nullable(),
+  /** 投递记录数：该候选人一共投了几个平台岗位；0 = 没有岗位线索，尚未归类 */
+  applicationCount: z.number().nullable(),
+  /** 最近一次投递解析出的需求单 ID；null = 尚未归类（见 applicationCount 说明） */
+  requestId: z.string().nullable(),
+  /** 最近一次投递对应的岗位名称（取自 hr_request.title） */
+  requestTitle: z.string().nullable(),
+  /** 最近一次投递的平台岗位 ID（BOSS jobId）；null = 采集时没拿到 */
+  platformJobId: z.string().nullable(),
+  /** 平台原文岗位线索（拼接文本，仅供人工辨认） */
+  platformJobHint: z.string().nullable(),
   mergedIntoId: z.string().nullable(),
+  /** 最新一次成功打分的总分 0-100；null = 尚无成功打分（未打/打分中/失败） */
+  latestScore: z.number().nullable(),
+  /** 最新一次成功打分的类型：match = 与需求单匹配 / general = 通用分析 */
+  latestScoreType: z.string().nullable(),
+  /** 最新一次成功打分的推荐结论：recommend / maybe / not_recommend */
+  latestRecommendation: z.string().nullable(),
   firstCollectedAt: z.string().nullable(),
   lastCollectedAt: z.string().nullable(),
 });
@@ -112,6 +128,70 @@ export const CollectAuditVOSchema = z.object({
 });
 export type CollectAuditVO = z.infer<typeof CollectAuditVOSchema>;
 
+// ---------- 投递（人 × 平台岗位） ----------
+
+/**
+ * 投递记录。`requestId` 为 null 表示该投递的平台岗位在中台还没建立映射，
+ * 此时 `platformJobHint`（平台原文，如「9月21日 沟通的职位-Java」）是人工认领的唯一依据。
+ */
+export const CandidateApplicationVOSchema = z.object({
+  id: z.string(),
+  candidateId: z.string(),
+  platform: z.string(),
+  /** 平台侧岗位 ID（BOSS jobId）—— 人工建立映射时要填的就是这个值 */
+  platformJobId: z.string(),
+  platformJobHint: z.string().nullable(),
+  /** 解析出的需求单 ID；null = 尚未归类 */
+  requestId: z.string().nullable(),
+  requestNo: z.string().nullable(),
+  requestTitle: z.string().nullable(),
+  sourceChannel: z.string().nullable(),
+  firstResumeVersionId: z.string().nullable(),
+  appliedAt: z.string().nullable(),
+  createdAt: z.string().nullable(),
+});
+export type CandidateApplicationVO = z.infer<typeof CandidateApplicationVOSchema>;
+
+// ---------- LLM 打分 ----------
+
+export const ResumeScoreDimensionSchema = z.object({
+  name: z.string(),
+  score: z.number().nullable(),
+  comment: z.string().nullable(),
+});
+export type ResumeScoreDimension = z.infer<typeof ResumeScoreDimensionSchema>;
+
+/**
+ * 简历 LLM 打分结果（采集落库后异步触发）。
+ * status=pending 表示打分中；failed 时 failReason 有值。
+ */
+export const ResumeScoreVOSchema = z.object({
+  id: z.string(),
+  candidateId: z.string(),
+  resumeVersionId: z.string(),
+  /** match = 与需求单匹配打分 / general = 通用简历分析 */
+  scoreType: z.string(),
+  /** pending / success / failed */
+  status: z.string(),
+  /** 总分 0-100；success 前为 null */
+  score: z.number().nullable(),
+  summary: z.string().nullable(),
+  /** recommend / maybe / not_recommend；仅 match 模式有参考意义 */
+  recommendation: z.string().nullable(),
+  requestId: z.string().nullable(),
+  requestTitle: z.string().nullable(),
+  dimensions: z.array(ResumeScoreDimensionSchema),
+  highlights: z.array(z.string()),
+  risks: z.array(z.string()),
+  model: z.string().nullable(),
+  failReason: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+export type ResumeScoreVO = z.infer<typeof ResumeScoreVOSchema>;
+
+export const ResumeScoreListSchema = z.array(ResumeScoreVOSchema);
+
 // ---------- 详情 ----------
 
 export const CandidateDetailVOSchema = z.object({
@@ -119,6 +199,8 @@ export const CandidateDetailVOSchema = z.object({
   versions: z.array(ResumeVersionVOSchema),
   attachments: z.array(AttachmentVOSchema),
   audits: z.array(CollectAuditVOSchema),
+  /** 该候选人投过的岗位；空数组是「本来就没投过」而非加载失败 */
+  applications: z.array(CandidateApplicationVOSchema),
 });
 export type CandidateDetailVO = z.infer<typeof CandidateDetailVOSchema>;
 
@@ -161,4 +243,15 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
 export const GENDER_LABELS: Record<number, string> = {
   1: '男',
   2: '女',
+};
+
+export const SCORE_TYPE_LABELS: Record<string, string> = {
+  match: '职位匹配',
+  general: '通用分析',
+};
+
+export const RECOMMENDATION_LABELS: Record<string, string> = {
+  recommend: '推荐面试',
+  maybe: '待定',
+  not_recommend: '不推荐',
 };

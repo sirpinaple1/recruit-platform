@@ -20,6 +20,13 @@ export const PublishRecordVOSchema = z.object({
   status: PublishRecordStatusSchema,
   accountLabel: z.string().nullable(),
   publishedUrl: z.string().nullable(),
+  /**
+   * 平台侧岗位 ID（BOSS jobId）—— 需求单与平台岗位的映射键。
+   * null = 该次发布还没建立映射（扩展未捕获到），需要人工绑定。
+   */
+  platformJobId: z.string().nullable(),
+  /** auto 扩展自动捕获 / manual 人工绑定；null = 尚未绑定 */
+  platformJobBindSource: z.string().nullable(),
   resultNote: z.string().nullable(),
   operatedBy: z.string().nullable(),
   publishedAt: z.string().nullable(),

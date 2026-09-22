@@ -12,8 +12,10 @@ import {
   updateHeadcount,
 } from '@/lib/api/hr-request.api';
 import { fetchDraftsByRequest } from '@/lib/api/publish-draft.api';
+import { fetchCandidatePage } from '@/lib/api/candidate.api';
 import { ApiError } from '@/lib/httpClient';
 import { formatUtcIso } from '@/lib/utils';
+import type { CandidateVO } from '@/types/candidate.types';
 import AppShell from '@/components/layout/AppShell.vue';
 import {
   CLOSE_REASON_LABELS,
@@ -56,6 +58,53 @@ const copiedDraftId = ref('');
 
 const editVisible = ref(false);
 
+// ---------- 推荐池（本职位下采集到的候选人）----------
+/**
+ * 推荐池的数据不是新表，而是「投递事实」的一个视角：
+ * 扩展采集时把候选人 × 平台岗位写进 candidate_application，岗位再经台账映射解出
+ * request_id —— 于是「这个职位收到了谁」天然可查（GET /api/candidates?requestId=）。
+ *
+ * ⚠️ 归属语义是「**投递过**该职位即命中」，不是「最近一次投递是该职位」：
+ * 一个人投了两个岗时，在两个岗位下都该出现（后端 candidateIdsByRequest 同口径）。
+ */
+const POOL_SIZE = 50;
+const poolRows = ref<CandidateVO[]>([]);
+const poolTotal = ref(0);
+const poolLoading = ref(false);
+const poolError = ref('');
+
+async function loadPool(): Promise<void> {
+  if (!requestId.value) return;
+  poolLoading.value = true;
+  poolError.value = '';
+  try {
+    const page = await fetchCandidatePage({
+      page: 1,
+      size: POOL_SIZE,
+      requestId: requestId.value,
+    });
+    poolRows.value = page.records;
+    poolTotal.value = page.total;
+  } catch (e) {
+    poolRows.value = [];
+    poolTotal.value = 0;
+    poolError.value = e instanceof ApiError ? e.message : '推荐池加载失败';
+  } finally {
+    poolLoading.value = false;
+  }
+}
+
+/** 推荐结论 → 中文标签（与 resume_score 的取值对齐） */
+const RECOMMENDATION_LABELS: Record<string, string> = {
+  recommend: '推荐',
+  maybe: '待定',
+  not_recommend: '不推荐',
+};
+
+function recommendationLabel(v: string | null): string | null {
+  return v ? (RECOMMENDATION_LABELS[v] ?? v) : null;
+}
+
 const visibleDrafts = computed(() => {
   return drafts.value.filter(d => d.status !== 'cancelled');
 });
@@ -80,6 +129,7 @@ async function load(): Promise<void> {
 
 onMounted(() => {
   void load();
+  void loadPool();
 });
 
 function educationLabel(v: string | null): string {
@@ -372,19 +422,75 @@ const PIPELINE_STAGES: ReadonlyArray<{ label: string; success?: boolean }> = [
         </div>
       </div>
 
-      <!-- 候选人管线（占位） -->
+      <!-- 候选人管线：推荐池已接真实数据，后续阶段仍是占位 -->
       <div class="grid grid-cols-5 gap-3">
         <div
-          v-for="stage in PIPELINE_STAGES"
+          v-for="(stage, stageIdx) in PIPELINE_STAGES"
           :key="stage.label"
           class="min-h-[240px] rounded-lg p-2.5"
           :class="stage.success ? 'bg-success-tint' : 'bg-[#F1F2F4]'"
         >
           <div class="flex items-center justify-between px-1 pb-2.5">
             <span class="text-[12.5px] font-semibold" :class="stage.success ? 'text-success' : ''">{{ stage.label }}</span>
-            <span class="text-xs text-t4">0</span>
+            <span class="flex items-center gap-1.5 text-xs text-t4">
+              <template v-if="stageIdx === 0">
+                <span>{{ poolLoading ? '…' : poolTotal }}</span>
+                <button
+                  class="text-[11px] text-t3 underline decoration-dotted transition hover:text-primary"
+                  title="采集后点这里刷新推荐池"
+                  @click="loadPool"
+                >
+                  刷新
+                </button>
+              </template>
+              <template v-else>0</template>
+            </span>
           </div>
-          <div class="flex flex-col gap-2">
+
+          <!-- 推荐池：真实候选人 -->
+          <div v-if="stageIdx === 0" class="flex max-h-[420px] flex-col gap-2 overflow-y-auto pr-0.5">
+            <div v-if="poolLoading" class="rounded-md border border-dashed border-line bg-white/60 px-3 py-6 text-center text-[11px] text-t4">
+              加载中…
+            </div>
+            <div v-else-if="poolError" class="rounded-md border border-dashed border-line bg-white/60 px-3 py-6 text-center text-[11px] text-danger">
+              {{ poolError }}
+            </div>
+            <div v-else-if="poolRows.length === 0" class="rounded-md border border-dashed border-line bg-white/60 px-3 py-6 text-center text-[11px] leading-5 text-t4">
+              暂无候选人。<br />在 BOSS 打开候选人简历或聊天窗口，点「采集到人才库」后回来刷新。
+            </div>
+            <template v-else>
+              <div
+                v-for="c in poolRows"
+                :key="c.id"
+                class="rounded-md border border-line bg-white px-2.5 py-2"
+                :title="c.platformJobHint ?? ''"
+              >
+              <div class="flex items-center justify-between gap-2">
+                <span class="truncate text-[12.5px] font-semibold text-t1">{{ c.name ?? '未知' }}</span>
+                <span
+                  v-if="c.latestScore != null"
+                  class="shrink-0 text-[11.5px] font-semibold"
+                  :class="c.latestScore >= 80 ? 'text-success' : (c.latestScore >= 60 ? 'text-warning' : 'text-t3')"
+                >
+                  {{ c.latestScore }}
+                </span>
+              </div>
+              <div class="mt-0.5 truncate text-[11px] text-t4">
+                {{ [c.currentTitle, c.education, c.workYear].filter(Boolean).join(' · ') || '—' }}
+              </div>
+              <div class="mt-1 flex flex-wrap items-center gap-x-1.5 text-[10.5px] text-t4">
+                <span v-if="c.latestRecommendation" class="rounded bg-hover px-1 py-px">
+                  {{ recommendationLabel(c.latestRecommendation) }}
+                </span>
+                <span v-if="c.attachmentCount">附件 {{ c.attachmentCount }}</span>
+                <span v-if="c.lastCollectedAt">{{ formatUtcIso(c.lastCollectedAt) }}</span>
+              </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- 后续阶段：占位 -->
+          <div v-else class="flex flex-col gap-2">
             <div class="rounded-md border border-dashed border-line bg-white/60 px-3 py-6 text-center text-[11px] text-t4">
               候选人模块建设中
             </div>

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 
 import AppShell from '@/components/layout/AppShell.vue';
+import PublishRecordJobBindDialog from '@/pages/publish-records/PublishRecordJobBindDialog.vue';
 import { fetchChannelList } from '@/lib/api/channel.api';
 import { fetchPublishRecordPage } from '@/lib/api/publish-record.api';
 import { ApiError } from '@/lib/httpClient';
@@ -15,7 +16,8 @@ import {
 
 /**
  * 发布台账页：渠道/状态为服务端筛选（分页），关键字为当前页客户端过滤。
- * 台账是发布闭环的最终事实来源（pending → published / failed）。
+ * 台账是发布闭环的最终事实来源（pending → published / failed），
+ * 也是**人工关联平台岗位**（路径 B，候选人与职位映射的兜底出口）的入口。
  */
 
 const PAGE_SIZE = 10;
@@ -36,6 +38,9 @@ const keyword = ref('');
 const channelFilter = ref('');
 const statusFilter = ref('');
 const channels = ref<ChannelVO[]>([]);
+
+/** 正在关联岗位的台账（非空时打开绑定抽屉） */
+const bindTarget = ref<PublishRecordVO | null>(null);
 
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
@@ -125,9 +130,10 @@ onMounted(() => {
 
     <!-- 表格卡片 -->
     <div class="overflow-hidden rounded-lg border border-line bg-white">
-      <div class="grid grid-cols-[1.5fr_110px_90px_120px_1.2fr_1.2fr_120px] items-center border-b border-divider bg-[#FAFBFC] px-5 py-2.5 text-[11.5px] font-medium text-t3">
+      <div class="grid grid-cols-[1.4fr_100px_130px_90px_110px_1.1fr_1.1fr_110px] items-center border-b border-divider bg-[#FAFBFC] px-5 py-2.5 text-[11.5px] font-medium text-t3">
         <div>需求</div>
         <div>渠道</div>
+        <div>平台岗位</div>
         <div>状态</div>
         <div>账号标识</div>
         <div>发布链接</div>
@@ -144,13 +150,33 @@ onMounted(() => {
       <div
         v-for="row in visibleRows"
         :key="row.id"
-        class="grid min-h-16 grid-cols-[1.5fr_110px_90px_120px_1.2fr_1.2fr_120px] items-center gap-5 border-b border-divider px-5 text-[13px] text-t2 transition last:border-b-0 hover:bg-[#FAFBFC]"
+        class="grid min-h-16 grid-cols-[1.4fr_100px_130px_90px_110px_1.1fr_1.1fr_110px] items-center gap-5 border-b border-divider px-5 text-[13px] text-t2 transition last:border-b-0 hover:bg-[#FAFBFC]"
       >
         <div class="min-w-0">
           <div class="truncate text-[13px] font-semibold text-t1">{{ row.requestTitle ?? '—' }}</div>
           <div class="mt-0.5 truncate font-mono text-[11.5px] text-t4">{{ row.requestNo ?? '—' }}</div>
         </div>
         <div class="min-w-0 truncate text-[12.5px] text-t3">{{ row.channelName ?? '—' }}</div>
+        <!-- 平台岗位：映射键。点击进入人工关联（路径 B）—— A 自动捕获失败时这是唯一出口，
+             因此即使是未关联状态也要是**可点的**，不能只显示一个灰色「—」。 -->
+        <div class="min-w-0">
+          <button
+            class="w-full min-w-0 rounded-md px-1.5 py-1 text-left transition hover:bg-hover"
+            :title="row.platformJobId ? '点击更正或解除关联' : '点击填写平台岗位 ID'"
+            @click="bindTarget = row"
+          >
+            <template v-if="row.platformJobId">
+              <div class="truncate font-mono text-[12px] text-t2">{{ row.platformJobId }}</div>
+              <div class="mt-0.5 text-[11px] text-t4">
+                {{ row.platformJobBindSource === 'manual' ? '人工绑定' : '自动捕获' }}
+              </div>
+            </template>
+            <template v-else>
+              <span class="text-[12.5px] text-warning">未关联</span>
+              <div class="mt-0.5 text-[11px] text-t4">点击填写</div>
+            </template>
+          </button>
+        </div>
         <div>
           <span class="rounded px-2 py-0.5 text-[11.5px] font-medium" :class="STATUS_CHIP_CLASS[row.status]">
             {{ PUBLISH_RECORD_STATUS_LABELS[row.status] }}
@@ -198,5 +224,13 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 人工关联平台岗位（路径 B）。保存成功后重查本页，让「来源/值」立即反映真实状态 -->
+    <PublishRecordJobBindDialog
+      :visible="bindTarget !== null"
+      :record="bindTarget"
+      @close="bindTarget = null"
+      @saved="load()"
+    />
   </AppShell>
 </template>

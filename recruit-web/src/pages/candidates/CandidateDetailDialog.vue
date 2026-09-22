@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { fetchAttachmentBlob, fetchCandidateDetail } from '@/lib/api/candidate.api';
 import { ApiError } from '@/lib/httpClient';
 import { cn, formatUtcIso } from '@/lib/utils';
+import ResumeScoreCard from '@/pages/candidates/ResumeScoreCard.vue';
 import {
   ATTACHMENT_STATUS_LABELS,
   AUDIT_ACTION_LABELS,
@@ -235,6 +236,43 @@ onBeforeUnmount(() => {
               <span class="ml-1 text-t1">{{ candidate.mergedIntoId ? `已并入 ${candidate.mergedIntoId}` : '独立记录' }}</span>
             </div>
           </div>
+
+          <!-- 投递职位（人 × 平台岗位） -->
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[13px] font-semibold text-t1">投递职位</span>
+            <span class="text-[12px] text-t4">
+              {{ detail.applications.length }} 条（来自采集响应中的平台岗位）
+            </span>
+          </div>
+          <div class="mb-4 overflow-hidden rounded-lg border border-line">
+            <div v-if="detail.applications.length === 0" class="px-4 py-6 text-center text-[12.5px] text-t4">
+              无岗位线索。说明该候选人不是投递来的（如推荐列表场景我方主动触达），
+              或采集时平台响应里没有岗位信息 —— 而不是系统漏记。
+            </div>
+            <div
+              v-for="a in detail.applications"
+              :key="a.id"
+              class="flex items-center gap-4 border-b border-divider px-4 py-2.5 text-[12.5px] last:border-b-0"
+            >
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-t1">
+                  <template v-if="a.requestTitle">{{ a.requestTitle }}</template>
+                  <template v-else><span class="text-warning">未归类</span></template>
+                </div>
+                <div class="mt-0.5 truncate text-[11.5px] text-t4" :title="a.platformJobHint ?? ''">
+                  平台岗位 {{ a.platformJobId }}
+                  <template v-if="a.requestNo"> · {{ a.requestNo }}</template>
+                  <template v-if="a.platformJobHint"> · {{ a.platformJobHint }}</template>
+                </div>
+              </div>
+              <div class="shrink-0 text-[11.5px] text-t4">
+                {{ a.appliedAt ? formatUtcIso(a.appliedAt) : '—' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- LLM 打分（采集落库后异步触发；独立组件见 ResumeScoreCard.vue） -->
+          <ResumeScoreCard :candidate-id="candidateId" class="mb-4" />
 
           <!-- 简历版本 -->
           <div class="mb-2 flex items-center gap-2">
