@@ -1,0 +1,47 @@
+# ==========================================
+#  recruit-ai-service（Python / FastAPI）systemd unit
+#
+#  安装位置：/etc/systemd/system/recruit-ai.service
+#  由 scripts/setup-ai-service-host.sh（root，一次性）安装；日常由 CI 的
+#  scripts/deploy-ai-service.sh 触发 restart。
+#
+#  ★ 密钥处理（刻意不用部署目录下的 .env）★
+#    LLM_API_KEY 只存在于 /etc/recruit/ai-service.env（root:root 600），
+#    由 systemd 以 root 身份读取后注入进程环境 —— 部署用户 gitlab-runner
+#    既不需要读、也读不到。对照 docs/conventions/db-migration-cd.md §6：
+#    那份凭据（migrate.env）是 640 给 runner 读的，因为 mysql 客户端本身就是
+#    runner 进程；这里没有这个必要，所以可以做到更严的 600。
+#    验证方式：GET /health 只回 "api_key_configured": true|false，不回传内容。
+#
+#  ★ EnvironmentFile 不带前导 "-" 是刻意的 ★
+#    文件缺失 = unit 启动失败（fail-fast）。带着空 key 跑起来更糟：
+#    打分请求会全量落 failed，且表面上"服务是活的"。
+# ==========================================
+[Unit]
+Description=recruit-ai-service (FastAPI, resume scoring)
+Documentation=file:/opt/recruit/ai-service/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 与部署用户同身份：/opt/recruit/ai-service 由 CI（gitlab-runner）写入，
+# 服务进程只需读；不开 root 权限。
+User=gitlab-runner
+Group=gitlab-runner
+WorkingDirectory=/opt/recruit/ai-service
+
+EnvironmentFile=/etc/recruit/ai-service.env
+# 只监听回环：调用方是同机的 recruit-server（ai.service.url 默认 127.0.0.1:8000），
+# 没有对外暴露的理由。LLM 单次调用可达数十秒，不设 --limit-concurrency，
+# 由 recruit-server 侧的 resumeScoreExecutor 线程池控制并发。
+ExecStart=/opt/recruit/ai-service/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=recruit-ai
+
+[Install]
+WantedBy=multi-user.target

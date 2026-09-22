@@ -1,0 +1,15 @@
+# ==========================================
+#  CI 以 gitlab-runner 运行，重启 AI 服务需要 root。
+#  按既有约定（systemctl restart recruit-server 走白名单）同样点名放行，
+#  不开 ALL、不给 shell。
+#
+#  安装（root，一次性）：
+#    install -m 440 -o root -g root deploy/sudoers/gitlab-runner-recruit-ai \
+#        /etc/sudoers.d/gitlab-runner-recruit-ai
+#    visudo -cf /etc/sudoers.d/gitlab-runner-recruit-ai   # 必须输出 "parsed OK"
+#
+#  ⚠️ 文件权限必须是 0440：sudo 会拒绝权限过松的 sudoers 片段。
+# ==========================================
+gitlab-runner ALL=(root) NOPASSWD: /usr/bin/systemctl restart recruit-ai.service
+gitlab-runner ALL=(root) NOPASSWD: /usr/bin/systemctl start recruit-ai.service
+gitlab-runner ALL=(root) NOPASSWD: /usr/bin/systemctl status recruit-ai.service

@@ -57,6 +57,19 @@ deploy:
     - sudo /usr/bin/systemctl restart recruit-server
     # ---------- 部署前端 ----------
     - rsync -a --delete recruit-web/dist/ /var/www/recruit/
+    # ---------- 部署 AI 服务（Python/FastAPI，resume 打分）----------
+    # ★ 顺序是刻意的：放在最后 ★
+    #   AI 是下游依赖且失败是静默的（打分落 failed，页面不报错），
+    #   所以它没部署成功必须让 job 标红 —— 但**不该**拦住后端/前端的发布。
+    #   把它排在 rsync dist 之后，就是为了保证「AI 挂了 = 只有 AI 没更新」，
+    #   而不是顺带把整站发布卡住。
+    # 脚本内部三道闸门：rsync → 单测 → 健康检查（含 api_key_configured 断言）。
+    # 前置（root，一次性）：scripts/setup-ai-service-host.sh
+    # 详见 docs/conventions/ai-service-cd.md
+    - bash scripts/deploy-ai-service.sh
     # ---------- 健康检查（失败则本次 job 标红，需人工介入） ----------
     - sleep 20
-    - curl -sf http://127.0.0.1:6017/api/health
+    - curl -sf --noproxy '*' http://127.0.0.1:6017/api/health
+    # 8000 = recruit-ai-service。--noproxy 是必须的：runner 环境若设了 http_proxy，
+    # 回环地址也会被送去代理，探测会拿到代理的 502 而不是服务真实状态。
+    - curl -sf --noproxy '*' http://127.0.0.1:8000/health
