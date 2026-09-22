@@ -37,6 +37,26 @@ public class PublishRecord {
     /** 发布成功后的岗位链接（HR 回填） */
     private String publishedUrl;
 
+    /**
+     * 平台侧岗位 ID（BOSS jobId，如 575500411）—— **机器映射键**。
+     *
+     * <p>与 {@link #publishedUrl} 的区别别混用：那个是人工可读的链接（可能带易变票据参数），
+     * 这个是稳定的等值映射键，用于把 {@code candidate_application.platform_job_id}
+     * 解析回 {@code hr_request.id}。二者可能同时有值，也可能只有其一。</p>
+     */
+    private String platformJobId;
+
+    /**
+     * 岗位 ID 来源：{@code NULL} 未绑定 / {@code auto} 扩展自动捕获 / {@code manual} 中台人工绑定。
+     *
+     * <p>这一列存在的唯一理由是**防「自动覆盖人工」**：自动流程只在为 NULL 时写入，
+     * 人工可覆盖任何状态。没有它，HR 手工纠正过的绑定会在下一次自动上报时被静默改回。</p>
+     */
+    private String platformJobBindSource;
+
+    /** 绑定岗位的操作人 sys_user.id（bind_source=manual 时有值，人工动作须可追溯） */
+    private Long platformJobBoundBy;
+
     /** 结果备注 */
     private String resultNote;
 

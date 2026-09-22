@@ -11,6 +11,7 @@ import com.recruit.entity.Attachment;
 import com.recruit.entity.Candidate;
 import com.recruit.entity.CollectAudit;
 import com.recruit.entity.ResumeVersion;
+import com.recruit.event.ResumeVersionCreatedEvent;
 import com.recruit.mapper.AttachmentMapper;
 import com.recruit.mapper.CandidateMapper;
 import com.recruit.mapper.CollectAuditMapper;
@@ -20,6 +21,7 @@ import com.recruit.vo.ExtCollectResultVO;
 import com.recruit.vo.ExtRulesVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -66,6 +68,10 @@ public class CollectService {
     private final AttachmentMapper attachmentMapper;
     private final CollectAuditMapper collectAuditMapper;
     private final AttachmentStorageService attachmentStorageService;
+    /** 投递事实（人 × 平台岗位）的落库入口；与本方法同事务 */
+    private final CandidateApplicationService candidateApplicationService;
+    /** 新版本事件发布：事务提交后由 ResumeScoreService 异步消费触发 LLM 打分 */
+    private final ApplicationEventPublisher eventPublisher;
 
     // ==================================================================
     // 规则下发（插件保持薄的关键，框架 §0 总原则第 3 条）
@@ -78,6 +84,8 @@ public class CollectService {
                 .version(CollectRules.VERSION)
                 .resumeKeys(CollectRules.RESUME_KEYS)
                 .noisyKeys(CollectRules.NOISY_KEYS)
+                .jobIdKeys(CollectRules.JOB_ID_KEYS)
+                .jobHintKeys(CollectRules.JOB_HINT_KEYS)
                 .attachUrlPattern(CollectRules.ATTACH_URL_PATTERN)
                 .attachContentTypePattern(CollectRules.ATTACH_CONTENT_TYPE_PATTERN)
                 .noisePathPrefixes(CollectRules.NOISE_PATH_PREFIXES)
@@ -238,6 +246,50 @@ public class CollectService {
             candidate.setVersionCount(Math.toIntExact(resumeVersionMapper.selectCount(
                     new LambdaQueryWrapper<ResumeVersion>().eq(ResumeVersion::getCandidateId, candidate.getId()))));
             candidateMapper.updateById(candidate);
+        }
+
+        // ---------- 2.5) 投递事实（人 × 平台岗位）----------
+        // 真机实测（2026-09-22，6/6 命中）：职位线索**本来就在采集到的候选人节点上**
+        // （body.resume.jobId = 575500411），只是过去没被提升为可查询、可关联的事实 ——
+        // 它一直躺在 resume_version.fields_json 里当不透明 JSON。详见
+        // docs/design/candidate-position-linking.md。
+        //
+        // ★ 岗位 ID 的两套形态与归一（2026-09-22 真机取证，见该文档 §10）★
+        //   采集节点上的是**数字**，发布台账 publish_record.platform_job_id 是**加密**。
+        //   直接落数字 → 与台账永不相等 → 映射永远解析不到 → 候选人永远「未归类」。
+        //   归一只能在扩展端做（翻译所需的「数字↔加密」同框配对只有页面侧看得到），
+        //   服务端优先采信扩展端给的 platformJobId，拿不到时退回从 fields 里按键表取
+        //   （老版本扩展、或扩展端未归一）。
+        //
+        // 拿不到 jobId 时**不落行**（不造「投了但不知投哪」的半行）；该候选人留给人工归类。
+        // request_id 由映射解析，映射未建立时为空，建立后由 CandidateApplicationService 级联补齐。
+        String platformJobId = StringUtils.hasText(p.getPlatformJobId())
+                ? p.getPlatformJobId().trim()
+                : pick(p.getFields(), CollectRules.JOB_ID_KEYS.toArray(String[]::new));
+        if (StringUtils.hasText(platformJobId) && !CollectRules.isEncryptedJobId(platformJobId)) {
+            // 数字形态 = 扩展端没拿到配对（该岗位还没进入桥），或老版本扩展。
+            // 不拦、不改写：照常落行，投递事实不能丢；只是 request_id 解析不到，
+            // 候选人库里显示「未归类」，事后可补（比丢一条投递强）。
+            log.warn("投递岗位 ID 非规范形态（未归一成加密），映射将解析不到：candidate={}, job={}, numeric={}",
+                    candidate.getId(), platformJobId, CollectRules.isNumericJobId(platformJobId));
+        }
+        candidateApplicationService.recordFromCollect(
+                candidate.getId(),
+                platform,
+                platformJobId,
+                StringUtils.hasText(p.getPlatformJobHint())
+                        ? p.getPlatformJobHint()
+                        : pick(p.getFields(), CollectRules.JOB_HINT_KEYS.toArray(String[]::new)),
+                candidate.getSourceChannel(),
+                version.getId(),
+                collectedAt);
+
+        // ---------- 2.6) LLM 打分触发 ----------
+        // 只在**新建版本**时发事件（版本去重跳过不发）—— 同一份内容天然不会重复打分。
+        // 事件在事务提交后（AFTER_COMMIT）才被消费，监听器看到的投递事实/需求单映射均已落库；
+        // 打分失败不回滚采集（增强能力，非必经环节），见 ResumeScoreService。
+        if (versionCreated) {
+            eventPublisher.publishEvent(new ResumeVersionCreatedEvent(candidate.getId(), version.getId()));
         }
 
         // ---------- 3) 附件登记（只登记元数据，字节由扩展端重放下载后回传） ----------

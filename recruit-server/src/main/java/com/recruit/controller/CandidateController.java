@@ -3,8 +3,10 @@ package com.recruit.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.recruit.common.R;
 import com.recruit.service.CandidateQueryService;
+import com.recruit.service.ResumeScoreService;
 import com.recruit.vo.CandidateDetailVO;
 import com.recruit.vo.CandidateVO;
+import com.recruit.vo.ResumeScoreVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
@@ -12,11 +14,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 候选人库查询（登录态，与渠道发布模块同鉴权口径）。
@@ -30,21 +35,55 @@ import java.nio.charset.StandardCharsets;
 public class CandidateController {
 
     private final CandidateQueryService candidateQueryService;
+    private final ResumeScoreService resumeScoreService;
 
-    /** 候选人分页（platform / keyword / sourceChannel 筛选；默认不含已归并行） */
+    /**
+     * 候选人分页（platform / keyword / sourceChannel / requestId 筛选；默认不含已归并行）。
+     *
+     * <p>{@code requestId} = 需求单 ID（雪花，前端以 String 传），语义是
+     * 「投递过该职位的候选人」，用于「按职位看候选人」。</p>
+     */
     @GetMapping
     public R<IPage<CandidateVO>> page(@RequestParam(defaultValue = "1") long page,
                                       @RequestParam(defaultValue = "10") long size,
                                       @RequestParam(required = false) String platform,
                                       @RequestParam(required = false) String keyword,
-                                      @RequestParam(required = false) String sourceChannel) {
-        return R.ok(candidateQueryService.page(page, size, platform, keyword, sourceChannel));
+                                      @RequestParam(required = false) String sourceChannel,
+                                      @RequestParam(required = false) String requestId) {
+        return R.ok(candidateQueryService.page(page, size, platform, keyword, sourceChannel, requestId));
     }
 
     /** 候选人详情：简历版本 + 附件 + 采集审计 */
     @GetMapping("/{id}")
     public R<CandidateDetailVO> detail(@PathVariable Long id) {
         return R.ok(candidateQueryService.detail(id));
+    }
+
+    /**
+     * 候选人的 LLM 打分结果列表（最新在前；含 match 匹配分与 general 通用分析）。
+     *
+     * <p>采集落库后异步触发打分，列表刚打开时可能还没有行（打分中/尚未打分）——
+     * 前端据此展示「打分中」或提供手动重打入口。</p>
+     */
+    @GetMapping("/{id}/scores")
+    public R<List<ResumeScoreVO>> scores(@PathVariable Long id) {
+        return R.ok(resumeScoreService.scores(id));
+    }
+
+    /**
+     * 手动重打（对候选人最新简历版本；异步执行，接口立即返回）。
+     *
+     * @param requestId 可选：指定与哪个需求单打匹配分；不传则自动取最新投递解析结果，
+     *                  解析不到就打通用分析
+     */
+    @PostMapping("/{id}/rescore")
+    public R<Map<String, Object>> rescore(@PathVariable Long id,
+                                          @RequestParam(required = false) Long requestId) {
+        Long resumeVersionId = resumeScoreService.prepareRescore(id, requestId);
+        resumeScoreService.rescoreAsync(id, resumeVersionId, requestId);
+        return R.ok(Map.of(
+                "resumeVersionId", String.valueOf(resumeVersionId),
+                "message", "已提交打分任务，稍后刷新查看结果"));
     }
 
     /**

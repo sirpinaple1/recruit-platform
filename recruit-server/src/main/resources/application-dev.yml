@@ -17,6 +17,11 @@ jwt:
   secret: ${JWT_SECRET:dev-only-jwt-secret-change-me-in-prod-0123456789abcdef}
   expire-hours: ${JWT_EXPIRE_HOURS:24}
 
+# recruit-ai-service（Python/FastAPI，本地开发默认 8000 端口）
+ai:
+  service:
+    url: ${AI_SERVICE_URL:http://localhost:8000}
+
 logging:
   level:
     com.recruit: debug

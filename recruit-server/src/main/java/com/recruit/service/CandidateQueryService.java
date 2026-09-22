@@ -6,15 +6,21 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.recruit.common.MyException;
 import com.recruit.entity.Attachment;
 import com.recruit.entity.Candidate;
+import com.recruit.entity.CandidateApplication;
 import com.recruit.entity.CollectAudit;
+import com.recruit.entity.HrRequest;
+import com.recruit.entity.ResumeScore;
 import com.recruit.entity.ResumeVersion;
 import com.recruit.entity.SysUser;
 import com.recruit.mapper.AttachmentMapper;
 import com.recruit.mapper.CandidateMapper;
 import com.recruit.mapper.CollectAuditMapper;
+import com.recruit.mapper.HrRequestMapper;
+import com.recruit.mapper.ResumeScoreMapper;
 import com.recruit.mapper.ResumeVersionMapper;
 import com.recruit.mapper.SysUserMapper;
 import com.recruit.vo.AttachmentVO;
+import com.recruit.vo.CandidateApplicationVO;
 import com.recruit.vo.CandidateDetailVO;
 import com.recruit.vo.CandidateVO;
 import com.recruit.vo.CollectAuditVO;
@@ -54,23 +60,56 @@ public class CandidateQueryService {
     private final AttachmentMapper attachmentMapper;
     private final CollectAuditMapper collectAuditMapper;
     private final SysUserMapper sysUserMapper;
+    private final HrRequestMapper hrRequestMapper;
+    private final ResumeScoreMapper resumeScoreMapper;
+    private final CandidateApplicationService candidateApplicationService;
     private final AttachmentStorageService attachmentStorageService;
 
-    /** 候选人分页（默认不展示已归并的行；可按平台/来源渠道/姓名筛选） */
-    public IPage<CandidateVO> page(long page, long size, String platform, String keyword, String sourceChannel) {
+    /**
+     * 候选人分页（默认不展示已归并的行；可按平台/来源渠道/姓名/**职位**筛选）。
+     *
+     * <p>{@code requestId} 一路是「按职位看候选人」的入口（设计文档
+     * candidate-position-linking.md 的「B 适配分类」诉求）。语义是
+     * <b>该候选人投递过这个职位即命中</b>，而不是「最近一次投递是这个职位」——
+     * 一个人投了两个岗时，在任一岗位筛选下都该出现。</p>
+     */
+    public IPage<CandidateVO> page(long page, long size, String platform, String keyword,
+                                   String sourceChannel, String requestId) {
         long safeSize = (size <= 0 || size > MAX_PAGE_SIZE) ? 10 : size;
+
+        // 职位筛选：先取「投过该职位的候选人 ID 集合」，再作为候选人查询的条件。
+        // 不能直接 join 到本查询上——候选人表与投递表无外键、也不做多表联查（沿用本项目
+        // 「引用完整性由应用层保证」的一贯口径）。
+        List<Long> requestCandidateIds = null;
+        if (StringUtils.hasText(requestId)) {
+            requestCandidateIds = candidateApplicationService.candidateIdsByRequest(parseId(requestId));
+            if (requestCandidateIds.isEmpty()) {
+                // 该职位下没有任何投递 —— 直接返回空页。
+                // 必须早返回：MyBatis-Plus 的 in() 传空集合会生成非法的 `IN ()`。
+                return new Page<CandidateVO>(page, safeSize, 0).setRecords(List.of());
+            }
+        }
+
         LambdaQueryWrapper<Candidate> wrapper = new LambdaQueryWrapper<Candidate>()
                 .isNull(Candidate::getMergedInto)
                 .eq(StringUtils.hasText(platform), Candidate::getPlatform, platform)
                 .eq(StringUtils.hasText(sourceChannel), Candidate::getSourceChannel, sourceChannel)
                 .like(StringUtils.hasText(keyword), Candidate::getName, keyword)
+                .in(requestCandidateIds != null, Candidate::getId, requestCandidateIds)
                 .orderByDesc(Candidate::getLastCollectedAt);
 
         IPage<Candidate> result = candidateMapper.selectPage(new Page<>(page, safeSize), wrapper);
         List<Candidate> rows = result.getRecords();
+        List<Long> ids = rows.stream().map(Candidate::getId).toList();
         Map<Long, Long> attachmentCounts = countAttachments(rows);
+        Map<Long, Long> applicationCounts = countApplications(ids);
+        Map<Long, CandidateApplication> latestApplications = candidateApplicationService.latestByCandidate(ids);
+        Map<Long, HrRequest> requestById = loadRequests(latestApplications.values());
+        Map<Long, ResumeScore> latestScores = latestSuccessScores(ids);
         List<CandidateVO> vos = rows.stream()
-                .map(c -> toVO(c, attachmentCounts.getOrDefault(c.getId(), 0L)))
+                .map(c -> toVO(c, attachmentCounts.getOrDefault(c.getId(), 0L),
+                        applicationCounts.getOrDefault(c.getId(), 0L),
+                        latestApplications.get(c.getId()), requestById, latestScores.get(c.getId())))
                 .toList();
         return new Page<CandidateVO>(result.getCurrent(), result.getSize(), result.getTotal()).setRecords(vos);
     }
@@ -101,14 +140,18 @@ public class CandidateQueryService {
                 .eq(Attachment::getCandidateId, candidateId)
                 .orderByDesc(Attachment::getCollectedAt));
         List<CollectAudit> audits = loadAudits(candidate);
+        List<CandidateApplication> applications = candidateApplicationService.listByCandidate(candidateId);
 
         Map<Long, String> operatorNames = loadOperatorNames(versions, attachments, audits);
+        Map<Long, HrRequest> requestById = loadRequests(applications);
 
         return CandidateDetailVO.builder()
-                .candidate(toVO(candidate, (long) attachments.size()))
+                .candidate(toVO(candidate, (long) attachments.size(), (long) applications.size(),
+                        applications.isEmpty() ? null : applications.get(0), requestById))
                 .versions(versions.stream().map(v -> toVersionVO(v, operatorNames)).toList())
                 .attachments(attachments.stream().map(a -> toAttachmentVO(a, operatorNames)).toList())
                 .audits(audits.stream().map(a -> toAuditVO(a, operatorNames)).toList())
+                .applications(applications.stream().map(a -> toApplicationVO(a, requestById)).toList())
                 .build();
     }
 
@@ -224,7 +267,92 @@ public class CandidateQueryService {
         }
     }
 
-    private CandidateVO toVO(Candidate c, Long attachmentCount) {
+    /**
+     * 批量取投递解析出的需求单（列表/详情共用），避免逐行查库。
+     * 只取非空 requestId；null 表示尚未归类，没有需求单可查。
+     */
+    private Map<Long, HrRequest> loadRequests(java.util.Collection<CandidateApplication> applications) {
+        Set<Long> requestIds = new HashSet<>();
+        for (CandidateApplication a : applications) {
+            if (a != null && a.getRequestId() != null) {
+                requestIds.add(a.getRequestId());
+            }
+        }
+        if (requestIds.isEmpty()) {
+            return Map.of();
+        }
+        return hrRequestMapper.selectBatchIds(requestIds).stream()
+                .collect(Collectors.toMap(HrRequest::getId, r -> r, (a, b) -> a));
+    }
+
+    /** 投递记录数（按候选人分组），列表页展示「投了几个岗」 */
+    private Map<Long, Long> countApplications(List<Long> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Long> counts = new HashMap<>();
+        candidateApplicationService.listByCandidateIds(candidateIds)
+                .forEach(a -> counts.merge(a.getCandidateId(), 1L, Long::sum));
+        return counts;
+    }
+
+    /**
+     * 每个候选人最新一条<b>成功</b>打分（列表页「匹配度」列）。
+     *
+     * <p>一人可能有多行打分（match / general、多次重打），按 id 取最新；
+     * 只取 success —— pending/failed 行不参与「最新分数」语义，否则会出现
+     * 「分数列显示上一次的旧分，但详情里其实打失败了」的不一致。</p>
+     */
+    private Map<Long, ResumeScore> latestSuccessScores(List<Long> candidateIds) {
+        if (candidateIds == null || candidateIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, ResumeScore> latest = new HashMap<>();
+        resumeScoreMapper.selectList(new LambdaQueryWrapper<ResumeScore>()
+                        .in(ResumeScore::getCandidateId, candidateIds)
+                        .eq(ResumeScore::getStatus, "success")
+                        .orderByDesc(ResumeScore::getId))
+                .forEach(s -> latest.putIfAbsent(s.getCandidateId(), s));
+        return latest;
+    }
+
+    /**
+     * 职位筛选参数解析。
+     *
+     * <p>前端传 String（雪花 ID 超出 JS 安全整数范围），这里转回 Long。
+     * 非法值**返回 null 而不是抛错**——筛选条件填错时退回「不筛选」比让整页 400 好，
+     * 与 keyword 的处理口径一致。</p>
+     */
+    private Long parseId(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(raw.trim());
+        } catch (NumberFormatException e) {
+            log.warn("职位筛选参数非法，已忽略：{}", raw);
+            return null;
+        }
+    }
+
+    private CandidateVO toVO(Candidate c, Long attachmentCount, Long applicationCount,
+                             CandidateApplication latest, Map<Long, HrRequest> requestById) {
+        return toVO(c, attachmentCount, applicationCount, latest, requestById, null);
+    }
+
+    private CandidateVO toVO(Candidate c, Long attachmentCount, Long applicationCount,
+                             CandidateApplication latest, Map<Long, HrRequest> requestById, ResumeScore latestScore) {
+        HrRequest request = (latest == null || latest.getRequestId() == null)
+                ? null : requestById.get(latest.getRequestId());
+        String recommendation = null;
+        if (latestScore != null && StringUtils.hasText(latestScore.getDetailsJson())) {
+            try {
+                recommendation = com.alibaba.fastjson2.JSON.parseObject(latestScore.getDetailsJson())
+                        .getString("recommendation");
+            } catch (Exception e) {
+                log.warn("列表打分 recommendation 解析失败: scoreId={}", latestScore.getId());
+            }
+        }
         return CandidateVO.builder()
                 .id(String.valueOf(c.getId()))
                 .platform(c.getPlatform())
@@ -243,9 +371,37 @@ public class CandidateQueryService {
                 .sourceChannel(c.getSourceChannel())
                 .versionCount(c.getVersionCount())
                 .attachmentCount(Math.toIntExact(attachmentCount))
+                .applicationCount(Math.toIntExact(applicationCount))
+                .requestId(latest == null || latest.getRequestId() == null
+                        ? null : String.valueOf(latest.getRequestId()))
+                .requestTitle(request == null ? null : request.getTitle())
+                .platformJobId(latest == null ? null : latest.getPlatformJobId())
+                .platformJobHint(latest == null ? null : latest.getPlatformJobHint())
                 .mergedIntoId(c.getMergedInto() == null ? null : String.valueOf(c.getMergedInto()))
+                .latestScore(latestScore == null ? null : latestScore.getScore())
+                .latestScoreType(latestScore == null ? null : latestScore.getScoreType())
+                .latestRecommendation(recommendation)
                 .firstCollectedAt(c.getFirstCollectedAt())
                 .lastCollectedAt(c.getLastCollectedAt())
+                .build();
+    }
+
+    private CandidateApplicationVO toApplicationVO(CandidateApplication a, Map<Long, HrRequest> requestById) {
+        HrRequest request = a.getRequestId() == null ? null : requestById.get(a.getRequestId());
+        return CandidateApplicationVO.builder()
+                .id(String.valueOf(a.getId()))
+                .candidateId(String.valueOf(a.getCandidateId()))
+                .platform(a.getPlatform())
+                .platformJobId(a.getPlatformJobId())
+                .platformJobHint(a.getPlatformJobHint())
+                .requestId(a.getRequestId() == null ? null : String.valueOf(a.getRequestId()))
+                .requestNo(request == null ? null : request.getRequestNo())
+                .requestTitle(request == null ? null : request.getTitle())
+                .sourceChannel(a.getSourceChannel())
+                .firstResumeVersionId(a.getFirstResumeVersionId() == null
+                        ? null : String.valueOf(a.getFirstResumeVersionId()))
+                .appliedAt(a.getAppliedAt())
+                .createdAt(a.getCreatedAt())
                 .build();
     }
 

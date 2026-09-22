@@ -107,6 +107,30 @@ public class ExtCollectSubmitDTO {
         @Size(max = 128)
         private String platformResumeId;
 
+        /**
+         * **岗位 ID（已由扩展端归一成加密形态）**，可空。
+         *
+         * <p>为什么由扩展端归一、而不是服务端自己从 fields 里取：
+         * BOSS 的岗位 ID 有<b>两套 ID 空间</b>（2026-09-22 真机取证）——
+         * 简历节点 {@code body.resume.jobId} 是<b>数字</b>（575500411），
+         * 而发布响应 {@code job/save} 与职位管理接口给的是<b>加密</b>形态
+         * （352f92eda67db1080nN_3t29FFNR）。发布台账 {@code publish_record.platform_job_id}
+         * 记的是加密形态，所以采集侧必须归一到同一形态，映射才解析得到。</p>
+         *
+         * <p>翻译只能靠「同一个对象节点里同时出现两种形态」的配对（实测
+         * {@code getBossFriendListV2} / {@code chatted/jobList} 613 次同框），
+         * 而这类响应<b>只有页面侧看得到</b>，服务端没有这个视野 —— 所以归一在扩展端做。</p>
+         *
+         * <p>⚠️ 拿不到配对时扩展端会照常把<b>原始数字形态</b>发上来（不丢投递事实）；
+         * 此时本值为数字，映射解析不到，该条投递显示为「未归类」，可事后补。</p>
+         */
+        @Size(max = 64, message = "岗位 ID 不能超过 64 字")
+        private String platformJobId;
+
+        /** 岗位文本提示（平台原文，仅供人工辨认，不参与任何自动匹配） */
+        @Size(max = 128)
+        private String platformJobHint;
+
         /** 归一后的结构化字段（工作经历/教育经历/期望等） */
         private Map<String, Object> fields;
 

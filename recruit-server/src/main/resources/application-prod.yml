@@ -21,6 +21,11 @@ jwt:
   secret: ${JWT_SECRET}
   expire-hours: ${JWT_EXPIRE_HOURS:24}
 
+# recruit-ai-service（Python/FastAPI）：与后端同机部署时默认回环地址，可环境变量覆盖
+ai:
+  service:
+    url: ${AI_SERVICE_URL:http://127.0.0.1:8000}
+
 logging:
   level:
     root: info

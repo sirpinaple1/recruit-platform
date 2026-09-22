@@ -2,8 +2,13 @@
 # recruit-platform 部署流水线
 # Runner: recruit-deploy（shell executor，部署机 118.145.246.201 本机构建本机部署）
 # 触发: main 分支 push
-# 动作: 后端 mvn 打包 + 前端 npm 构建 → 替换 jar + rsync dist → 重启后端 → 健康检查
+# 动作: 后端 mvn 打包 + 前端 npm 构建 → DDL 迁移 → 替换 jar + rsync dist → 重启后端 → 健康检查
 # 权限: gitlab-runner 用户运行；systemctl restart 走 /etc/sudoers.d/gitlab-runner 白名单
+#
+# ⚠️ DDL 迁移位置是刻意的：必须在 restart 之前。
+#    2026-09-22 采集恒定 500 的根因就是「新代码 + 旧结构」
+#    （candidate.platform_user_id_alt 缺列，迁移漏执行）。
+#    见 docs/troubleshooting/collect-500-schema-drift-20260922.md
 # ====================================
 stages:
   - deploy
@@ -11,6 +16,13 @@ stages:
 deploy:
   stage: deploy
   tags: [recruit-deploy]
+  variables:
+    # DDL 迁移用「最小权限凭据」：文件只含连库参数，不含 JWT_SECRET / Redis 等应用密钥。
+    # 账号 recruit_ddl：能改结构（ALTER/CREATE/DROP/INDEX）、改不了业务数据（无 UPDATE/DELETE），
+    # 仅台账表 schema_migration 有表级 UPDATE（ON DUPLICATE KEY UPDATE 需要）。
+    # 刻意不用 /etc/recruit/recruit-server.env —— 那是 root 600，本 job 以 gitlab-runner 跑读不到，
+    # 且放开读取等于把全部应用密钥暴露给 runner。详见 docs/conventions/db-migration-cd.md §6
+    MIGRATE_ENV_FILE: /etc/recruit/migrate.env
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:
@@ -23,6 +35,16 @@ deploy:
     - npm ci --no-audit --no-fund
     - npm run build
     - cd "$CI_PROJECT_DIR"
+    # ---------- DDL 迁移（★ 必须在 systemctl restart 之前）----------
+    # 语义与闸门见 docs/conventions/db-migration-cd.md：
+    #   · sql/*.sql 是幂等收敛脚本，改了就重跑；未变则按 checksum 跳过
+    #   · 迁移前自动做结构快照（/opt/recruit/backup/）
+    #   · sql/upgrade/ 默认不执行（一次性迁移走人工闸门：RUN_UPGRADE=1）
+    #   · 破坏性 DDL 需 ALLOW_DESTRUCTIVE=1 放行
+    # 失败即 job 失败 → 走不到下面的 restart → 旧版继续对外服务（这是本步骤存在的意义）
+    # 前提已配好（部署机，2026-09-22）：凭据 /etc/recruit/migrate.env（640 root:gitlab-runner）、
+    # 账号 recruit_ddl、备份目录 /opt/recruit/backup（gitlab-runner 可写）
+    - bash scripts/db-migrate.sh
     # ---------- 部署后端 ----------
     - cp -f recruit-server/target/recruit-server-0.0.1-SNAPSHOT.jar /opt/recruit/recruit-server-0.0.1-SNAPSHOT.jar
     - sudo /usr/bin/systemctl restart recruit-server

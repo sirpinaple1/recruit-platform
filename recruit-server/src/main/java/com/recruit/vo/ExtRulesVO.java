@@ -28,6 +28,18 @@ public class ExtRulesVO {
     /** 噪声键：命中只记录不判定（如 jobStatus 在职位列表里是「职位状态」） */
     private List<String> noisyKeys;
 
+    /**
+     * 岗位 ID 键：从候选人节点上识别「这次投递的是平台哪个岗位」的键表。
+     *
+     * <p>与 {@link #resumeKeys} 同源（{@code CollectRules.JOB_ID_KEYS}），
+     * 只用于发布成功页的岗位捕获与字段解读，<b>不参与简历命中判定</b>——
+     * 判定必须保持只认 {@code resumeKeys}，否则职位列表接口会被误判成简历。</p>
+     */
+    private List<String> jobIdKeys;
+
+    /** 岗位文本提示键（平台原文，仅供人工辨认，不参与判定） */
+    private List<String> jobHintKeys;
+
     /** 附件 URL 识别正则（Phase 0 实测：附件不在 JSON 里，只能按 URL + content-type 识别） */
     private String attachUrlPattern;
 
