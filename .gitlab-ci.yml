@@ -23,6 +23,13 @@ deploy:
     # 刻意不用 /etc/recruit/recruit-server.env —— 那是 root 600，本 job 以 gitlab-runner 跑读不到，
     # 且放开读取等于把全部应用密钥暴露给 runner。详见 docs/conventions/db-migration-cd.md §6
     MIGRATE_ENV_FILE: /etc/recruit/migrate.env
+    # 点名放行「带 information_schema 守卫」的 ALTER（索引/列已存在则自动跳过，幂等）。
+    # ★ 刻意不用 ALLOW_DESTRUCTIVE=1 ★
+    #   那是全局开关，一旦成为每次发布的常备项，破坏性闸门就名存实亡。
+    #   这里只对审过的脚本让路，其余脚本照常拦（不放行会让 job 失败、旧版继续服务）。
+    #   不放行会发生什么：publish_record 的平台岗位三列建不上 → 新代码查生产库
+    #   报 Unknown column → 采集/归类 500。
+    ALLOW_DESTRUCTIVE_SCRIPTS: publish_record_alter_add_platform_job_id_20260922_V1.sql
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:

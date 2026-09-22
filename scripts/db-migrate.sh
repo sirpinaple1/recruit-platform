@@ -26,6 +26,8 @@
 #   bash scripts/db-migrate.sh                 # 正常执行
 #   DRY_RUN=1 bash scripts/db-migrate.sh       # 只列出会发生什么，不写任何东西
 #   RUN_UPGRADE=1 bash scripts/db-migrate.sh   # 同时执行 sql/upgrade/
+#   ALLOW_DESTRUCTIVE_SCRIPTS=publish_record_alter_add_platform_job_id_20260922_V1.sql \
+#       bash scripts/db-migrate.sh             # 点名放行某个已审过的破坏性脚本
 #
 # ⚠️ 中文紧贴变量名必须写成 ${var}：bash 3.2（macOS 自带）会把紧邻的多字节字符
 #    误并入变量名，报 `key?: unbound variable`。本文件已全部按 ${var} 书写。
@@ -67,6 +69,17 @@ LOCK_FILE="${MIGRATE_LOCK_FILE:-/tmp/recruit-db-migrate.lock}"
 DRY_RUN="${DRY_RUN:-0}"
 RUN_UPGRADE="${RUN_UPGRADE:-0}"
 ALLOW_DESTRUCTIVE="${ALLOW_DESTRUCTIVE:-0}"
+# 逐脚本放行名单（逗号分隔的台账键，如 sql/ 下就是文件名；seed/upgrade 需带目录前缀）。
+#
+# ★ 为什么要有这个、而不用 ALLOW_DESTRUCTIVE=1 ★
+#   闸门本意是「破坏性语句停下来等人确认」。但有一类脚本**本身是安全的**：
+#   带 information_schema 守卫的 ALTER（索引/列已存在就自动跳过），
+#   它只在老库上第一次跑时才动手，之后永远自跳。对这类脚本每次都拦，
+#   结果就是把 ALLOW_DESTRUCTIVE=1 变成每次发布的常备项 —— 闸门随即名存实亡
+#   （脚本头注释第 5 条已明确反对这种做法）。
+#   所以改成**点名放行**：闸门对其它脚本照常生效，只对审过的脚本让路，
+#   且放行时仍打 ⚠️ 让 reviewers 看见。
+ALLOW_DESTRUCTIVE_SCRIPTS="${ALLOW_DESTRUCTIVE_SCRIPTS:-}"
 
 parse_jdbc() {
     # jdbc:mysql://HOST[:PORT]/DB[?params] -> "HOST PORT DB"
@@ -244,6 +257,19 @@ ledger_checksum() {
     q "SELECT checksum FROM schema_migration WHERE script='$1';"
 }
 
+# 该脚本是否在「逐脚本放行名单」里。
+# 匹配用「两端补逗号」的整段包含，避免 publish_x 命中 publish_xyz 这类前缀误放行。
+destructive_allowed() {
+    local key="$1" base list
+    [ -n "$ALLOW_DESTRUCTIVE_SCRIPTS" ] || return 1
+    list=",${ALLOW_DESTRUCTIVE_SCRIPTS},"
+    base="$(basename "$key")"
+    if [ "${list#*,$key,}" != "$list" ] || [ "${list#*,$base,}" != "$list" ]; then
+        return 0
+    fi
+    return 1
+}
+
 apply_one() {
     # $1 = 台账键（相对路径）  $2 = 绝对路径
     local key="$1" path="$2" sum before after ms err summary ledger_out
@@ -256,9 +282,14 @@ apply_one() {
     fi
 
     if grep -Eq "$DESTRUCTIVE_RE" "$path" && [ "$ALLOW_DESTRUCTIVE" != "1" ]; then
-        mark_fail "${key} 含破坏性语句（DROP/TRUNCATE/ADD UNIQUE），需 ALLOW_DESTRUCTIVE=1 才放行"
-        BLOCKED=$((BLOCKED + 1))
-        return 1
+        if destructive_allowed "$key"; then
+            mark_warn "${key} 含破坏性语句，但在放行名单中（已人工审查：带守卫，幂等）"
+        else
+            mark_fail "${key} 含破坏性语句（DROP/TRUNCATE/ADD UNIQUE），"
+            printf '      → 需 ALLOW_DESTRUCTIVE=1，或把该脚本加入 ALLOW_DESTRUCTIVE_SCRIPTS（逐脚本放行）\n'
+            BLOCKED=$((BLOCKED + 1))
+            return 1
+        fi
     fi
     # MODIFY COLUMN 非阻断，但**汇总**提示而不是逐条刷屏：
     # 本仓库的「注释收敛」段合法使用它，逐条告警会训练人忽略。
