@@ -19,6 +19,7 @@
  *   T4–T6 消息链路：页面 FILL_REQUEST → bridge 重发 → relay 转发，且恰好一次（双发是老 bug）
  *   T7–T8 反序注入不炸（文件顺序被调换时不能塌）
  *   T9–T11 重复注入：各自 window 标记生效，心跳与监听器不叠加
+ *   T12–T13 另一组同世界组合（BOSS 发布页：message-relay + sentinel）同样不抛错
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,6 +28,7 @@ const vm = require('vm');
 const CONTENT_DIR = path.join(__dirname, '..', 'extension', 'content');
 const RELAY = path.join(CONTENT_DIR, 'message-relay.js');
 const BRIDGE = path.join(CONTENT_DIR, 'bridge.js');
+const SENTINEL = path.join(CONTENT_DIR, 'sentinel.js');
 const ORIGIN = 'http://118.145.246.201';
 
 const results = [];
@@ -160,6 +162,26 @@ check(
   'T11 重复注入后 message 监听未叠加（每支各一个）',
   (w3.captured.message || []).length === 2,
   String((w3.captured.message || []).length)
+);
+
+// —— T12–T13：BOSS 发布页的同世界组合（message-relay + sentinel）——
+const w4 = makeWorld();
+w4.sandbox.document = { body: {} };
+w4.sandbox.MutationObserver = class {
+  observe() {}
+};
+let err4 = null;
+try {
+  run(w4.sandbox, RELAY);
+  run(w4.sandbox, SENTINEL);
+} catch (e) {
+  err4 = String((e && e.message) || e);
+}
+check('T12 同世界注入 message-relay + sentinel 不抛错', err4 === null, err4);
+check(
+  'T13 sentinel 因缺配置而安全退出（不应中断脚本）',
+  w4.sandbox.window['recruit-sentinel-active'] === true,
+  String(w4.sandbox.window['recruit-sentinel-active'])
 );
 
 let failed = 0;

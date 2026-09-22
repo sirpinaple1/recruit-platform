@@ -28,7 +28,13 @@
  *    只在运行时炸）。需要示例时用文字描述代替。
  *
  * 策略：保守双命中（URL 变化 + 选择器出现；任一方无配置则跳过该方判定）
+ *
+ * ⚠️ 整体包 IIFE（2026-09-22）：本文件与 message-relay.js 同属一个 content_scripts
+ *    的 js 数组，注入**同一个隔离世界**，顶层作用域共享。顶层裸写 let/const 会在
+ *    "两个文件同名"时抛 SyntaxError 并让其中一支整支不运行（见 bridge.js 事故）。
+ *    一律包 IIFE，不向共享顶层作用域泄漏标识符。
  */
+(() => {
 'use strict';
 
 // 全局标识避免重复注入
@@ -180,3 +186,4 @@ function startSentinel(config) {
     }
   }).observe(document.body, { subtree: true, childList: true });
 }
+})();

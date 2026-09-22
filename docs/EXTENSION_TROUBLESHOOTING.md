@@ -124,12 +124,15 @@ diff -r ~/recruit-platform/extension ~/recruit-platform-github/extension && echo
 })();
 ```
 
-同世界的文件组合（现状）：
+同世界的文件组合（现状，均已包 IIFE）：
 | 世界 | 文件组合 |
 |---|---|
 | 中台页面（5173/5176/118.145.246.201） | `message-relay.js` + `bridge.js` |
 | BOSS 发布页 | `message-relay.js` + `sentinel.js` |
-| BOSS 聊天/简历页 | `collect-bridge.js` + `collect-hook.js`(MAIN 世界，独立) + `collect-button.js` |
+| BOSS 聊天/简历页 | `collect-bridge.js` + `collect-button.js` + `collect-hook.js`（MAIN 世界，独立） |
+
+> `collect-*.js` 一直是 IIFE；2026-09-22 把 `message-relay.js` / `bridge.js` / `sentinel.js`
+> 补齐，现在 content/ 下**没有任何文件向共享顶层作用域声明标识符**。
 
 **回归测试**（改完 content script 先跑它，比在浏览器里点一遍快）：
 
