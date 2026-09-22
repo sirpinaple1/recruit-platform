@@ -69,6 +69,40 @@
 
 ---
 
+### 0.2 改完代码「没生效」：先确认 Chrome 到底加载了哪个目录
+
+> 2026-09-22 实测：本机同时存在两份克隆 —— `~/recruit-platform` 与 `~/recruit-platform-github`。
+> 代码改在前者，Chrome 加载的却是后者的 `extension/`，于是「改了、重载了、还是不行」，
+> 控制台里打印的还是旧代码。
+
+**不要靠猜**，直接问浏览器。Chrome 把已加载的扩展记录在
+`~/Library/Application Support/Google/Chrome/<Profile>/Secure Preferences` 里
+（新版本不再放在 `Preferences`，翻旧文件会一无所获）：
+
+```bash
+python3 - <<'PY'
+import json, glob, os
+for pref in glob.glob(os.path.expanduser(
+        '~/Library/Application Support/Google/Chrome/*/Secure Preferences')):
+    data = json.load(open(pref, encoding='utf-8'))
+    for eid, cfg in (data.get('extensions', {}).get('settings') or {}).items():
+        p = cfg.get('path') or ''
+        if p.startswith('/Users'):          # location=4 即「已解压加载」
+            print(cfg.get('location'), p)
+PY
+```
+
+命中路径若与你的工作目录不一致，**先 reload 的是哪份、改的是哪份**就对上了。
+两个目录同名文件比对（一眼看出新旧）：
+
+```bash
+diff -r ~/recruit-platform/extension ~/recruit-platform-github/extension && echo 一致
+```
+
+> 建议：全机只保留一份克隆，其余删除或改名。多份克隆 + 解压式加载是「改了没反应」的头号原因。
+
+---
+
 ### 一条命令自检 content script 是否注入
 
 在中台页面 Console 里执行：
