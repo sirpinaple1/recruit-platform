@@ -147,9 +147,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 成功后广播 PUBLISH_BACK 给中台 tab
   if (msg && msg.type === 'SENTINEL_REPORT') {
     console.log('[Background] 收到 SENTINEL_REPORT:', msg.payload);
-    const { recordId, publishedUrl, platformTabId } = msg.payload || {};
+    const { recordId, publishedUrl, platformTabId,
+            platformJobId, platformJobHint, platformJobSource } = msg.payload || {};
 
-    reportPublishSuccess(recordId, publishedUrl)
+    // 岗位映射随回填一起上报（路径 A）。拿不到时 platformJobId 为 undefined，
+    // 请求体里就不会出现该字段，后端按「尚未绑定」处理 —— 与「不猜」的口径一致。
+    reportPublishSuccess(recordId, publishedUrl, { platformJobId, platformJobHint, platformJobSource })
       .then(() => {
         // 广播 PUBLISH_BACK 给中台 tab
         if (platformTabId) {
@@ -159,6 +162,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             payload: {
               recordId,
               publishedUrl,
+              platformJobId: platformJobId || null,
               timestamp: Date.now(),
             },
           });
@@ -191,11 +195,447 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+
+  // ---------- 诊断录制：岗位探针上行 ----------
+  // 探针在 MAIN 世界只写内存并 postMessage；转发层（ISOLATED）负责送过来，
+  // 本 worker 负责聚合 + 落 chrome.storage.session（人能导出、worker 重启也不丢）。
+  if (msg && msg.type === 'JOB_PROBE_RECORD') {
+    // 不 await：录制很密集，逐条等落盘会拖慢 worker。diagAppend 内部自行保证顺序与限流。
+    void diagAppend(msg.payload, sender.tab ? sender.tab.id : null);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'JOB_PROBE_HINT') {
+    void diagNoteHint(msg.payload, sender.tab ? sender.tab.id : null);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'JOB_PROBE_RECORD_LIMIT') {
+    void diagNoteLimit(msg.payload);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'JOB_PROBE_RECORD_STATE') {
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  // ---------- 诊断录制：popup 控制面 ----------
+  if (msg && msg.type === 'DIAG_GET_FLAG') {
+    // 转发层在 document_start 装载时问一次「现在该不该录」（见 job-probe-relay.js 头注释）。
+    // 必须先水合，否则 worker 刚重启时会答 false，把录制悄悄关掉。
+    diagEnsureHydrated().then(() => sendResponse({ recording: diagRecording }));
+    return true;
+  }
+  if (msg && msg.type === 'DIAG_STATUS') {
+    diagStatus().then((s) => sendResponse(s)).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg && msg.type === 'DIAG_START') {
+    diagStart(msg.payload || {}).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg && msg.type === 'DIAG_STOP') {
+    diagStop().then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg && msg.type === 'DIAG_CLEAR') {
+    diagClear().then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+  if (msg && msg.type === 'DIAG_EXPORT') {
+    diagExport().then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
+});
+
+// ============================================================
+// 诊断录制（岗位 ID 捕获点取证）
+//
+// 目的：BOSS 到底在哪个接口、哪个字段给出「这次发布的是哪个岗位」，是**未经验证的
+//      平台行为**。路径 A 若只靠猜键表就是赌博。本模块让人做一次真机发布，
+//      把所有响应录下来，事后离线翻查 —— 用事实而不是猜测来定键表。
+//
+// 合规边界（与本项目「只做主动触发」的一贯立场一致，不因为是诊断就放松）：
+//   · 默认**关闭**；必须由人在 popup 里显式开启
+//   · 数据只落 chrome.storage.session（本地、会话级、关浏览器即清）
+//   · **不自动外发任何一条**；只有人点「导出」才下载成文件
+//   · 二进制一律不读内容，只记「这里有个非文本响应」
+// ============================================================
+
+const DIAG_KEY = 'diag_records';
+const DIAG_META_KEY = 'diag_meta';
+/** 环形缓冲条数上限 */
+const DIAG_MAX_ITEMS = 400;
+/** 环形缓冲总量上限（body 长度合计），防止把 storage.session 配额撑爆 */
+const DIAG_MAX_TOTAL = 4 * 1024 * 1024;
+/** 写盘节流：录制很密集，每条都写 storage 会拖慢 worker */
+const DIAG_FLUSH_MS = 1500;
+
+let diagPending = [];
+let diagFlushTimer = null;
+/** 开关水合的进程内单例 Promise（见 diagEnsureHydrated 的说明） */
+let diagReady = null;
+
+/**
+ * 录制开关的**内存镜像 + 权威判定**。
+ *
+ * <p>停止录制为什么不由「广播通知页面」来保证：页面里的探针是 MAIN 世界的独立副本，
+ * 广播可能因为帧找不到、扩展刚重载、tab 权限不足而**送不到**；
+ * 一旦送不到，页面会继续录、继续上报，用户以为停了其实没停。
+ * 所以以 background 这一侧的标志为权威 —— 停止后即使还有条目涌进来，也直接丢弃。
+ * 广播只作为「省点开销」的优化，不是正确性的依赖。</p>
+ */
+let diagRecording = false;
+
+/**
+ * MV3 的 service worker 随时可能被回收重启，重启后内存标志是空白的，
+ * 必须先从 storage 水合回来 —— 而水合是**异步**的。
+ *
+ * <p><b>为什么不能只在顶层 `void diagHydrate()` 就算完</b>：
+ * 重启后 worker 会给积压的消息派发事件，若某条 `JOB_PROBE_RECORD` 在水合完成前到达，
+ * 此时 `diagRecording` 仍是 false，那条记录会被<b>静默丢弃</b>——
+ * 表现成「录制开着却一条没录到」，极难排查（实测踩过：popup 显示已开始录制、条数为 0）。
+ * 所以改成「首个条目到达时先 await 水合」，用一个进程内单例 Promise 保证只读一次。</p>
+ */
+/** 用户是否在本进程内显式设过开关（设过之后，晚到的水合结果不得覆盖） */
+let diagExplicit = false;
+
+function diagEnsureHydrated() {
+  if (!diagReady) diagReady = diagHydrate();
+  return diagReady;
+}
+
+async function diagHydrate() {
+  try {
+    const s = await chrome.storage.session.get(['diag_recording']);
+    // 竞态防护：若「水合」与「用户点开始/停止」并发，显式动作优先。
+    // 否则一个更早发出的水合 promise 晚到，会把刚设好的值覆盖回旧值，
+    // 表现成「点了开始但没在录」/「点了停止却还在录」，两种都很难查。
+    if (!diagExplicit) {
+      diagRecording = s.diag_recording === true;
+    }
+  } catch (e) { /* storage 不可用则按不录 */ }
+  return diagRecording;
+}
+
+async function diagSetRecording(on) {
+  diagExplicit = true;
+  diagRecording = on === true;
+  // 让水合单例指向已确定的值，后续 diagAppend 的 await 立刻返回、不会倒退
+  diagReady = Promise.resolve(diagRecording);
+  try {
+    await chrome.storage.session.set({ diag_recording: diagRecording });
+  } catch (e) { /* ignore */ }
+}
+
+async function diagReadAll() {
+  const s = await chrome.storage.session.get([DIAG_KEY, DIAG_META_KEY]);
+  return { records: s[DIAG_KEY] || [], meta: s[DIAG_META_KEY] || {} };
+}
+
+/** 入队 + 节流落盘（放在内存里攒，避免每条都写 storage） */
+async function diagAppend(entry, tabId) {
+  // 先 await 水合：worker 刚重启时内存标志还是 false，直接判定会把记录静默丢掉
+  await diagEnsureHydrated();
+  if (!diagRecording) return;
+  if (!entry || !entry.url) return;
+  diagPending.push(Object.assign({ tabId: tabId || null }, entry));
+  diagScheduleFlush();
+}
+
+function diagScheduleFlush() {
+  if (diagFlushTimer) return;
+  diagFlushTimer = setTimeout(() => {
+    diagFlushTimer = null;
+    void diagFlush();
+  }, DIAG_FLUSH_MS);
+}
+
+async function diagFlush() {
+  if (!diagPending.length) return;
+  const batch = diagPending;
+  diagPending = [];
+  try {
+    const { records, meta } = await diagReadAll();
+    const merged = records.concat(batch);
+    let total = merged.reduce((n, r) => n + (r.bodyText ? r.bodyText.length : 0), 0);
+    let trimmed = meta.trimmed || 0;
+    // 三重上限（条数 / 总量）——超限丢**最旧**的：
+    // 诊断关心「刚刚发岗位时发生了什么」，保留最近的才有价值。
+    while (merged.length > DIAG_MAX_ITEMS || total > DIAG_MAX_TOTAL) {
+      const dropped = merged.shift();
+      if (!dropped) break;
+      total -= dropped.bodyText ? dropped.bodyText.length : 0;
+      trimmed += 1;
+    }
+    await chrome.storage.session.set({
+      [DIAG_KEY]: merged,
+      [DIAG_META_KEY]: Object.assign({}, meta, {
+        count: merged.length,
+        bytes: total,
+        trimmed,
+        updatedAt: new Date().toISOString()
+      })
+    });
+  } catch (e) {
+    console.warn('[Background] 诊断录制落盘失败（可能超配额，将丢弃本批）:', e && e.message);
+  }
+}
+
+async function diagNoteHint(payload, tabId) {
+  try {
+    const { meta } = await diagReadAll();
+    await chrome.storage.session.set({
+      [DIAG_META_KEY]: Object.assign({}, meta, {
+        lastHint: payload,
+        lastHintTabId: tabId || null,
+        lastHintAt: new Date().toISOString()
+      })
+    });
+  } catch (e) { /* ignore */ }
+}
+
+async function diagNoteLimit(payload) {
+  try {
+    const { meta } = await diagReadAll();
+    await chrome.storage.session.set({
+      [DIAG_META_KEY]: Object.assign({}, meta, {
+        pageLimitHit: payload,
+        pageLimitAt: new Date().toISOString()
+      })
+    });
+  } catch (e) { /* ignore */ }
+}
+
+async function diagStatus() {
+  await diagFlush(); // 把内存里还没写的先落下去，状态才对得上
+  const { records, meta } = await diagReadAll();
+  return {
+    ok: true,
+    recording: diagRecording,
+    count: records.length,
+    bytes: meta.bytes || 0,
+    trimmed: meta.trimmed || 0,
+    startedAt: meta.startedAt || null,
+    updatedAt: meta.updatedAt || null,
+    // 内容脚本是否注册成功 —— 注册失败意味着「之后加载的页面都不会被录」，
+    // 这是「明明开着录制却只录到一部分」的头号原因，必须显式暴露出来
+    registered: meta.registered === true,
+    lastHint: meta.lastHint || null,
+    pageLimitHit: meta.pageLimitHit || null
+  };
+}
+
+/**
+ * 录制会话用「动态注册内容脚本」而不是只做一次性注入。
+ *
+ * <p><b>为什么必须这样</b>（两次真机取证失败换来的结论）：</p>
+ * <ol>
+ *   <li><b>一次性注入只覆盖注入那一刻的活动 tab。</b> 填充流程会**新开**一个发布页 tab，
+ *       探针留在旧 tab，新 tab 一条都录不到。</li>
+ *   <li><b>注入发生在填充完成之后</b>，页面加载期与填充期的请求全部错过。</li>
+ *   <li><b>页面一跳转，注入的脚本就没了</b> —— 发布成功后回列表页刷新是常见动作，
+ *       恰好把最需要的「列表接口带出新岗位 ID」那一段丢掉。</li>
+ * </ol>
+ * <p>动态注册（document_start、全帧）把这三个问题一次解决：注册期间**任何** zhipin
+ * 页面的**每次**加载都会自动带上探针与转发层。</p>
+ *
+ * <p><b>合规边界</b>：注册只在「人显式开始录制」到「停止」之间有效，
+ * 且 <code>persistAcrossSessions: false</code>（浏览器重启不会残留）。
+ * 停止时立即注销 —— 不做常驻 hook。</p>
+ */
+const DIAG_SCRIPT_IDS = ['recruit-job-probe-main', 'recruit-job-probe-relay'];
+const DIAG_MATCHES = ['https://www.zhipin.com/*', 'https://*.zhipin.com/*'];
+
+async function diagRegisterScripts() {
+  try {
+    // 先注销：注册是幂等的，但残留的旧同 id 注册会让 register 直接抛错
+    await chrome.scripting.unregisterContentScripts({ ids: DIAG_SCRIPT_IDS });
+  } catch (e) { /* 本来就没有，正常 */ }
+  try {
+    await chrome.scripting.registerContentScripts([
+      {
+        id: 'recruit-job-probe-main',
+        matches: DIAG_MATCHES,
+        js: ['content/job-probe.js'],
+        runAt: 'document_start',
+        allFrames: true,
+        world: 'MAIN',
+        persistAcrossSessions: false,
+      },
+      {
+        id: 'recruit-job-probe-relay',
+        matches: DIAG_MATCHES,
+        js: ['content/job-probe-relay.js'],
+        runAt: 'document_start',
+        // 全帧各有一份：转发层按 ev.source === window 只上报本帧，
+        // 既保证恰好一次，又让每个帧（含 iframe）都能自己同步录制开关。
+        allFrames: true,
+        world: 'ISOLATED',
+        persistAcrossSessions: false,
+      },
+    ]);
+    console.log('[Background] 诊断录制：内容脚本已注册（document_start / 全帧）');
+    return true;
+  } catch (e) {
+    console.warn('[Background] 诊断录制：内容脚本注册失败:', e && e.message);
+    return false;
+  }
+}
+
+async function diagUnregisterScripts() {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: DIAG_SCRIPT_IDS });
+    console.log('[Background] 诊断录制：内容脚本已注销');
+  } catch (e) { /* 本来就没有，忽略 */ }
+}
+
+/**
+ * 导航兜底：录制期间，任何 zhipin 页面加载完成就补注一次探针。
+ *
+ * <p><b>为什么注册了脚本还要这一层</b>：</p>
+ * <ul>
+ *   <li>动态注册对 `world: 'MAIN'` 的支持随 Chrome 版本而异，注册可能失败或被忽略 ——
+ *       而失败是**静默**的（返回不代表生效），不能把正确性押在它上面。</li>
+ *   <li>注册只对**之后**加载的页面生效；已经打开的页面靠 diagStart 的一次性注入，
+ *       而那次注入发生在填充之后，看不到页面加载期的请求。</li>
+ * </ul>
+ * <p>读取 tab.url 需要 host 权限 —— 本扩展有 zhipin 的 host_permissions，故可读；
+ * 非 zhipin 页面直接跳过（也避免对无权限的域调用 executeScript 抛出噪声）。</p>
+ * <p>重复注入是安全的：探针有 `__recruit_job_probe_active` 守卫，只会同步开关、不会重复挂 hook。</p>
+ */
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!diagRecording) return;
+  if (!changeInfo || changeInfo.status !== 'complete') return;
+  const url = tab && tab.url;
+  if (!url || !/^https?:\/\/([^/]*\.)?zhipin\.com\//.test(url)) return;
+  void diagInjectProbe(tabId, true).then((ok) => {
+    if (ok) console.log('[Background] 诊断录制：导航兜底注入完成 tabId=' + tabId);
+  }).catch(() => { /* 注入失败不影响页面 */ });
 });
 
 /**
+ * 开始录制：① 动态注册内容脚本（管住**后续**所有页面加载）
+ *          ② 同时对当前活动 tab 立即注入一次（管住**已经打开**的这一页）
+ *
+ * 两步缺一不可：注册只对之后加载的页面生效，而人往往是「页面已经开着」才点开始录制。
+ */
+async function diagStart(opts) {
+  const tabId = opts.tabId;
+  if (!tabId) throw new Error('缺少 tabId');
+  // 先置标志再注入：注入是异步的，期间若有响应进来也不该被丢掉
+  await diagSetRecording(true);
+  const registered = await diagRegisterScripts();
+  try {
+    // ★ 合并而不是整体覆盖 meta ★
+    //   直接 set({[DIAG_META_KEY]: {startedAt, tabId}}) 会把 bytes / count / trimmed /
+    //   lastHint 一起抹掉 —— 表现成「明明录了一堆，状态却显示 0 KB」，
+    //   而且「环形缓冲丢过条目」这个关键警告也会消失，会误导诊断结论（实测踩过）。
+    const { meta } = await diagReadAll();
+    await chrome.storage.session.set({
+      [DIAG_META_KEY]: Object.assign({}, meta, {
+        startedAt: new Date().toISOString(),
+        tabId,
+        registered,
+      })
+    });
+  } catch (e) { /* ignore */ }
+  const injected = await diagInjectProbe(tabId, true);
+  return { ok: true, injected, registered };
+}
+
+async function diagStop() {
+  await diagSetRecording(false);
+  await diagUnregisterScripts();
+  await diagFlush();
+  // 广播关录只是「省开销」的优化，不是正确性依赖（见 diagRecording 注释）。
+  // 注意：tabs.query 的 url 过滤依赖 host 权限，权限不足时会抛 —— 忽略即可。
+  try {
+    const tabs = await chrome.tabs.query({ url: ['*://*.zhipin.com/*'] });
+    await Promise.all(tabs.map((t) => chrome.tabs.sendMessage(
+      t.id, { target: 'job-probe-relay', command: 'RECORD_OFF' }).catch(() => {})));
+  } catch (e) { /* 权限不足/无匹配 tab，不影响已停止的事实 */ }
+  const s = await diagStatus();
+  return { ok: true, count: s.count };
+}
+
+async function diagClear() {
+  await chrome.storage.session.remove([DIAG_KEY, DIAG_META_KEY]);
+  diagPending = [];
+  return { ok: true, count: 0 };
+}
+
+/** 导出聚合结果（含元信息，便于离线核对「录了多久、有没有被截断」） */
+async function diagExport() {
+  await diagFlush();
+  const { records, meta } = await diagReadAll();
+  return {
+    ok: true,
+    exportedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    meta,
+    count: records.length,
+    records
+  };
+}
+
+/**
+ * 注入「岗位探针 + 转发层」。
+ *
+ * @param recording 是否同时打开录制（注入前必须先把开关写进页面，脚本装载时读一次）
+ * @param rulesOverride 键表覆盖（发布流程按渠道数据给；不传则用兜底表）
+ * @returns 是否注入成功（探针与转发层任一失败都算失败，调用方据此提示）
+ */
+async function diagInjectProbe(tabId, recording, rulesOverride) {
+  const rules = rulesOverride || {
+    jobIdKeys: FALLBACK_JOB_ID_KEYS,
+    jobHintKeys: FALLBACK_JOB_HINT_KEYS,
+  };
+  let ok = true;
+  try {
+    // 1) 规则 + 录制开关：必须在脚本装载之前写入（脚本启动时读一次）
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      world: 'MAIN',
+      func: (r, rec) => {
+        window.__RECRUIT_JOB_PROBE_RULES__ = r;
+        window.__RECRUIT_JOB_PROBE_RECORD__ = rec;
+      },
+      args: [rules, !!recording],
+    });
+  } catch (e) {
+    console.warn('[Background] 探针规则注入失败:', e && e.message);
+    ok = false;
+  }
+  try {
+    // 2) 探针本体（MAIN，全帧）——发布页可能是 iframe，顶层注了不等于覆盖到
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      world: 'MAIN',
+      files: ['content/job-probe.js'],
+    });
+  } catch (e) {
+    console.warn('[Background] 探针注入失败:', e && e.message);
+    ok = false;
+  }
+  try {
+    // 3) 转发层（ISOLATED，全帧）：每帧各一份，各自只上报本帧的消息
+    //    （顶层帧不再替子帧转发 —— 否则同一条会被上报两次，数据看着翻倍）
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['content/job-probe-relay.js'],
+    });
+  } catch (e) {
+    console.warn('[Background] 探针转发层注入失败:', e && e.message);
+    ok = false;
+  }
+  return ok;
+}
+
+/**
  * 换权：调用 /api/extension/session-token 获取扩展 token
- * 
+ *
  * 逻辑：
  * 1. 从 storage 读取本地已存的 ext_token（如有）
  * 2. 调用接口，传入 oldToken
@@ -420,10 +860,32 @@ async function sendMessageToTab(tabId, message) {
  * 成功后页面约 1s 即跳转列表页会中断未完成的 fetch——由本 worker（持有
  * host_permissions、生命周期独立于页面导航）代理执行。
  */
-async function reportPublishSuccess(recordId, publishedUrl) {
+/**
+ * 回填发布结果。
+ *
+ * @param jobBinding 岗位映射（可选）：{ platformJobId, platformJobHint, platformJobSource }
+ *        —— 平台岗位 ID 拿不到时三个字段都可为空，此时不往请求体里塞这些键，
+ *        后端按「尚未绑定」处理，由中台人工绑定兜底（见设计文档 candidate-position-linking.md）。
+ */
+async function reportPublishSuccess(recordId, publishedUrl, jobBinding) {
   const stored = await chrome.storage.local.get(['ext_token']);
   const token = stored.ext_token;
   if (!token) throw new Error('未找到扩展 token，无法回填');
+
+  const payload = {
+    status: 'published',
+    publishedUrl,
+  };
+  const binding = jobBinding || {};
+  if (binding.platformJobId) {
+    payload.platformJobId = binding.platformJobId;
+  }
+  // 来源与平台原文提示只进 resultNote 之外的诊断通道，不占业务字段：
+  // 后端 platform_job_hint 由采集侧（候选人节点上的 bottomText）负责，
+  // 这里的 jobSource 只用于真机排障，写进 note 便于日志对齐。
+  if (binding.platformJobSource) {
+    payload.resultNote = '扩展自动关联平台岗位（来源：' + binding.platformJobSource + '）';
+  }
 
   const resp = await fetch(`${await getApiBase()}/api/ext/records/${recordId}/report`, {
     method: 'POST',
@@ -431,10 +893,7 @@ async function reportPublishSuccess(recordId, publishedUrl) {
       'Content-Type': 'application/json',
       'X-Extension-Token': token,
     },
-    body: JSON.stringify({
-      status: 'published',
-      publishedUrl,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!resp.ok) {
@@ -457,8 +916,51 @@ async function reportPublishSuccess(recordId, publishedUrl) {
  * @param {object} successConfig - 成功信号配置 { urlPattern, selectors, timeoutMs }
  * @param {number} platformTabId - 中台页面 tabId（用于回传 PUBLISH_BACK）
  */
+/**
+ * 岗位 ID 键表兜底值（与后端 CollectRules.JOB_ID_KEYS / job-probe.js 的 DEFAULT_RULES 保持一致）。
+ *
+ * 为什么有兜底而不是只依赖后端下发：发布回填链路与采集链路是两条，
+ * HR 可能先发布、后采集（此时还没拉过采集规则）。拿不到规则也必须能捕获岗位 ID，
+ * 否则路径 A 会因「没拉过另一个接口」静默失效 —— 这与 FALLBACK_RESUME_KEYS 是同一个理由。
+ *
+ * 渠道数据（field_map_json.jobIdKeys）若配了，优先用渠道的（逻辑后置，平台改版不改扩展发版）。
+ */
+const FALLBACK_JOB_ID_KEYS = ['jobId', 'encryptJobId', 'jobIdEncrypt'];
+const FALLBACK_JOB_HINT_KEYS = ['bottomText'];
+
+/**
+ * 注入岗位捕获探针（MAIN 世界，覆盖所有帧）。
+ *
+ * 为什么必须 MAIN 世界：只有主世界能 hook 到页面自己的 fetch / XMLHttpRequest。
+ * 为什么必须 allFrames：BOSS 发布页是 /web/frame/job/publish-edit（frame 形态），
+ *   发布提交的响应不一定发生在顶层帧，只在顶层注入会看不到。
+ * 为什么允许失败：探针是「多一条通道」，不是必要条件 —— 哨兵仍会退到 URL / DOM 两路。
+ *   探针注入失败绝不能让填充流程失败（那条链路是用户可感知的主功能）。
+ */
+async function injectJobProbe(tabId, successConfig) {
+  const fromChannel = (successConfig && Array.isArray(successConfig.jobIdKeys)
+    && successConfig.jobIdKeys.length) ? successConfig.jobIdKeys : null;
+  const rules = {
+    jobIdKeys: fromChannel || FALLBACK_JOB_ID_KEYS,
+    jobHintKeys: (successConfig && Array.isArray(successConfig.jobHintKeys)
+      && successConfig.jobHintKeys.length) ? successConfig.jobHintKeys : FALLBACK_JOB_HINT_KEYS,
+  };
+  // ★ 若诊断录制已开着，发布流程注入的探针也必须带录制开关 ★
+  //   否则会出现最坏的情况：人明明点了「开始录制」，发布过程却一条都没录到，
+  //   拿去分析时误判成「发布时平台没返回岗位信息」。
+  const recording = diagRecording;
+  const ok = await diagInjectProbe(tabId, recording, rules);
+  if (ok) {
+    console.log('[Background] 岗位探针已注入，键表:', rules.jobIdKeys, '录制:', recording);
+  }
+  // 注入失败不阻断：哨兵还有 URL / DOM 两条退路，最差情况是留空等人工绑定
+}
+
 async function injectSentinel(targetTabId, recordId, successConfig, platformTabId) {
   console.log('[Background] 准备注入哨兵, targetTabId:', targetTabId, 'recordId:', recordId);
+
+  // 0. 岗位捕获探针（路径 A：发布成功时把平台岗位 ID 一并带回）
+  await injectJobProbe(targetTabId, successConfig);
 
   // 1. 构造哨兵配置（回填 fetch 由 background 代理，无需下发 token）
   const sentinelConfig = {
@@ -693,6 +1195,82 @@ function flattenCaptures(frames) {
   });
   all.sort((a, b) => (b.matchedKeyCount || 0) - (a.matchedKeyCount || 0));
   return all;
+}
+
+/**
+ * 汇总所有帧上报的「岗位 ID 数字 ↔ 加密」配对，建成一张数字 → 加密的翻译表。
+ *
+ * ★ 为什么必须有这张表（2026-09-22 真机取证）★
+ *   BOSS 的岗位 ID 有两套 ID 空间：
+ *     · 数字  jobId 575500411      —— 简历采集拿到的 body.resume.jobId 是它
+ *     · 加密  encryptJobId 352f9…  —— 发布响应 job/save 与职位管理接口是它
+ *   而发布台账记的 platform_job_id 是加密形态。若采集侧直接落数字，
+ *   与台账里的加密值**永不相等** → 映射永远解析不到，候选人永远「未归类」。
+ *
+ * 配对只在**同一个对象节点内**产生（见 hook 的 pairFromNode），所以不存在
+ * 「A 岗位的数字配到 B 岗位的加密」这种张冠李戴。
+ */
+function collectJobPairs(frames) {
+  const map = new Map();
+  frames.forEach((f) => {
+    (f.jobPairs || []).forEach((p) => {
+      if (!p || !p.num || !p.enc) return;
+      const num = String(p.num).trim();
+      const enc = String(p.enc).trim();
+      if (!looksNumericId(num) || !looksEncryptedId(enc)) return;
+      // 同一个数字 ID 被两个不同的加密 ID 声称（理论上不该发生）→ 以后到的为准，
+      // 同时打点：真出现说明配对口径有问题，得回来看，而不是默默取一个。
+      if (map.has(num) && map.get(num) !== enc) {
+        console.warn('[Background] 岗位 ID 配对冲突:', num, map.get(num), 'vs', enc);
+      }
+      map.set(num, enc);
+    });
+  });
+  return map;
+}
+
+/**
+ * 把采集到的岗位 ID 归一成**加密形态**（台账侧的规范形）。
+ *
+ * @param rawJobId 候选人节点上取到的岗位 ID（可能是数字，也可能已经是加密）
+ * @param pairs    数字 → 加密 翻译表
+ * @returns {{ jobId:string, normalized:boolean, reason:string }}
+ *
+ * 为什么规范形只能是加密、不能是数字：
+ *   新发布的岗位在「桥」里**还没有数字形态**（还没有任何候选人跟它聊过），
+ *   发布当时换不出数字；而采集时必定已有聊天，桥里两种形态都在。
+ *   所以发布侧存加密、采集侧归一到加密，是唯一自洽的方向。
+ */
+function normalizeJobId(rawJobId, pairs) {
+  const raw = rawJobId == null ? '' : String(rawJobId).trim();
+  if (!raw) return { jobId: '', normalized: false, reason: 'empty' };
+  if (looksEncryptedId(raw)) return { jobId: raw, normalized: false, reason: 'already-encrypted' };
+  if (!looksNumericId(raw)) return { jobId: raw, normalized: false, reason: 'unrecognized-shape' };
+  const enc = pairs && pairs.get(raw);
+  if (enc) return { jobId: enc, normalized: true, reason: 'bridged' };
+  // 归一失败也**照常返回原始数字形态**：投递事实不能丢（人不落行 = 这次投递永久消失）。
+  // request_id 会解析不到 → 候选人库里显示「未归类」，事后可补，比丢数据强。
+  return { jobId: raw, normalized: false, reason: 'no-bridge' };
+}
+
+/**
+ * 从采集到的字段里取岗位 ID。
+ *
+ * ⚠️ 键名遍历顺序**不代表可信度**：真机实测 jobId 这个键在 job/data/list 里装数字、
+ * 在 job/save 里装加密，同名不同物。所以这里只负责「取到一个非空标量」，
+ * 形态判定一律交给 normalizeJobId 按**值的形状**做。
+ */
+function pickJobId(fields, keys) {
+  if (!fields) return null;
+  const list = Array.isArray(keys) && keys.length ? keys : FALLBACK_JOB_ID_KEYS;
+  for (const k of list) {
+    const v = fields[k];
+    if (v == null) continue;
+    if (typeof v === 'object') continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
 }
 
 /**
@@ -1627,6 +2205,23 @@ async function handleCollectRequest(payload, tabId) {
 
   const sourceUrl = fieldsCapture ? fieldsCapture.capture.url : '';
 
+  // ---------- 岗位 ID 归一（数字 → 加密）----------
+  // 简历节点上的 body.resume.jobId 是**数字**，而发布台账记的是**加密**形态，
+  // 直接落数字会让映射永远解析不到（2026-09-22 真机取证）。这里用同一次采集
+  // 会话里页面侧看到的「数字 ↔ 加密」配对把数字换掉。详见 normalizeJobId 注释。
+  const jobPairs = collectJobPairs(frames);
+  const rawJobId = pickJobId(fields, (rules && rules.jobIdKeys) || FALLBACK_JOB_ID_KEYS);
+  const jobNorm = normalizeJobId(rawJobId, jobPairs);
+  const jobHint = pickJobId(fields, (rules && rules.jobHintKeys) || FALLBACK_JOB_HINT_KEYS);
+  if (rawJobId) {
+    console.log('[Background] 岗位 ID 归一:', {
+      raw: rawJobId, jobId: jobNorm.jobId, normalized: jobNorm.normalized,
+      reason: jobNorm.reason, bridgeSize: jobPairs.size,
+    });
+  } else {
+    console.log('[Background] 未取到岗位 ID（bridgeSize=' + jobPairs.size + '）—— 该条投递将显示为未归类');
+  }
+
   // ---------- 附件合并（页面 hook + 扩展层观察）----------
   // 比对基准：这个人的**全部**已知标识 —— 主键、备用数字 uid、来源 URL 的 gid，
   // 从各条命中响应体里能捞到的所有 ID，以及**跨 ID 空间的映射**（数字 uid → 加密 geekId）。
@@ -1771,6 +2366,11 @@ async function handleCollectRequest(payload, tabId) {
     source: sourceFromScene(scene),
     sourceApi: sourceUrl,
     sourceUrl,
+    // 岗位 ID：**已归一成加密形态**（与发布台账 platform_job_id 同形态，映射才解析得到）。
+    // 拿不到桥时退化为原始数字形态 —— 照样落行，只是这条投递暂时「未归类」，
+    // 宁可显示未归类，也不让投递事实凭空消失。
+    platformJobId: jobNorm.jobId || null,
+    platformJobHint: jobHint || null,
     fields,
     raw: fieldsCapture ? fieldsCapture.capture.bodyText : null,
     rawEncrypted: 0, // Phase 0 ADJUST-1：详情页密文原样存 raw，这里不做解密判断

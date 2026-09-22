@@ -111,6 +111,49 @@ const REAL_PEER_LIST_BODY = JSON.stringify({
 
 const REAL_SOURCE_URL = 'https://www.zhipin.com/wapi/zpjob/chat/geek/info';
 
+// ============================================================ 岗位 ID 的两套形态（2026-09-22 真机取证）
+// 真机录制 326 条 / 2.9MB 的结论：
+//   数字 jobId 575500411            → 只在聊天/候选人侧（getBossFriendListV2、chatted/jobList）
+//   加密 encryptJobId 352f92eda…    → 只在职位管理侧（job/data/list）+ 发布响应 job/save
+// 而发布台账 publish_record.platform_job_id 记的是**加密**形态，
+// 采集节点上的 body.resume.jobId 是**数字** —— 两者永不相等，映射永远解析不到。
+// 唯一出路：拿「同一个对象节点里两种形态同框」的配对做翻译（实测 613 次同框）。
+const REAL_JOB_NUM = '575500411';
+const REAL_JOB_ENC = '352f92eda67db1080nN_3t29FFNR';
+const REAL_JOB_ENC_OTHER = 'a5d0bf426e1373a90nN92dS_F1RX';
+
+/** 候选人节点上带岗位 ID 的简历体（真机形态：数字 jobId + bottomText 同节点） */
+const REAL_RESUME_BODY_JOB = JSON.stringify({
+  code: 0,
+  zpData: {
+    messages: [{
+      body: {
+        resume: {
+          user: { uid: Number(REAL_UID_GEEK), name: '陈诗健' },
+          encryptUid: REAL_ENC_GEEK,
+          education: '本科',
+          expectSalary: '20-30K',
+          workYear: 3,
+          workExpList: [{ company: '某公司', positionName: 'Java' }],
+          jobId: Number(REAL_JOB_NUM),
+          bottomText: '9月21日 沟通的职位-Java',
+        },
+      },
+    }],
+  },
+});
+
+/** 桥端点响应：同一个对象节点里两种形态同框（真实形态） */
+const REAL_BRIDGE_BODY = JSON.stringify({
+  code: 0,
+  zpData: {
+    jobList: [
+      { jobId: Number(REAL_JOB_NUM), encryptJobId: REAL_JOB_ENC, jobName: 'Java工程师' },
+      { jobId: 575500400, encryptJobId: REAL_JOB_ENC_OTHER, jobName: '测试工程师' },
+    ],
+  },
+});
+
 // 带加密 ID 的候选人：真机上**只有一部分人**有（多数只回数字 uid）。
 // 「主动探测」这条路只在有加密 geekId 时才谈得上 —— 数字 uid 拼进下载端点解析不出东西。
 const REAL_RESUME_BODY_ENC = JSON.stringify({
@@ -163,7 +206,7 @@ function htmlResponse() {
   };
 }
 
-function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCaptures, attachResponse }) {
+function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCaptures, attachResponse, jobPairs }) {
   const bodyText = body || RESUME_BODY;
   const local = { ext_token: 'EXTTOK', collect_self_uid: HR_UID };
   const session = { collect_recent_attachments: cacheHits || [] };
@@ -219,6 +262,8 @@ function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCapture
       rulesVersion: 'test',
       selfUidHint: HR_UID,
       captures,
+      // 页面侧看到的「岗位 ID 数字 ↔ 加密」配对（桥端点的响应），供采集侧归一
+      jobPairs: jobPairs || [],
       attachments: hookAttachments || [],
       ringSize: 40,
       hitCount: captures.length,
@@ -233,7 +278,15 @@ function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCapture
       lastError: null,
       id: 'test',
     },
-    storage: { local: area(local), session: area(session) },
+    storage: {
+      local: area(local),
+      session: area(session),
+      // background.js 顶层会挂 storage.onChanged（切后端地址时刷新缓存）。
+      // 不补这一项，整个 harness 在装载 background.js 时就崩，
+      // 采集链路会**一条断言都跑不到** —— 实测踩过：报错只指到 background.js:56，
+      // 看起来像被测代码有 bug，实际是替身缺 API。
+      onChanged: { addListener() {}, removeListener() {} },
+    },
     tabs: {
       sendMessage: async (tabId, msg) => { calls.tabMsgs.push(msg && msg.type); return frames; },
       query: async () => [],
@@ -825,11 +878,186 @@ function runPartB() {
   check('B/T6 标记来源为 dom', out.every((a) => a.sourceScene === 'dom' || a.sourceScene === 'attach'), JSON.stringify(out.map((a) => a.sourceScene)));
 }
 
+// ============================================================ C. 岗位 ID 归一（数字 → 加密）
+// 2026-09-22 真机取证：岗位 ID 有两套 ID 空间。发布台账记加密、采集节点给数字，
+// 不归一则映射永远解析不到（候选人永远「未归类」）。这组断言锁住归一方向与失败兜底。
+async function runPartC() {
+  // C/T1 主路径：数字 jobId + 桥里恰好有这一对 → 归一成加密
+  {
+    const h = makeHarness({
+      sourceUrl: REAL_SOURCE_URL,
+      body: REAL_RESUME_BODY_JOB,
+      jobPairs: [{ num: REAL_JOB_NUM, enc: REAL_JOB_ENC }],
+      attachResponse: () => htmlResponse(),
+    });
+    await collect(h, { scene: 'chat', sourceChannel: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    const p = h.calls.submits[0].candidates[0];
+    check('C/T1 数字岗位 ID 被归一成加密形态', p.platformJobId === REAL_JOB_ENC, String(p.platformJobId));
+    check('C/T1 岗位提示原样带出（仅供人工辨认）',
+      p.platformJobHint === '9月21日 沟通的职位-Java', String(p.platformJobHint));
+  }
+
+  // C/T2 桥里有多个岗位，不能张冠李戴（只能翻译**同一个**数字 ID）
+  {
+    const h = makeHarness({
+      sourceUrl: REAL_SOURCE_URL,
+      body: REAL_RESUME_BODY_JOB,
+      jobPairs: [
+        { num: '575500400', enc: REAL_JOB_ENC_OTHER },
+        { num: REAL_JOB_NUM, enc: REAL_JOB_ENC },
+      ],
+      attachResponse: () => htmlResponse(),
+    });
+    await collect(h, { scene: 'chat', sourceChannel: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    const p = h.calls.submits[0].candidates[0];
+    check('C/T2 多岗位并存时取的是自己那一对（不串岗）', p.platformJobId === REAL_JOB_ENC, String(p.platformJobId));
+  }
+
+  // C/T3 没拿到桥：照常落行，落原始数字形态 —— 投递事实不能丢
+  {
+    const h = makeHarness({
+      sourceUrl: REAL_SOURCE_URL,
+      body: REAL_RESUME_BODY_JOB,
+      jobPairs: [],
+      attachResponse: () => htmlResponse(),
+    });
+    await collect(h, { scene: 'chat', sourceChannel: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    const p = h.calls.submits[0].candidates[0];
+    check('C/T3 无桥时仍落行（值为原始数字形态，未归类但事实不丢）',
+      p.platformJobId === REAL_JOB_NUM, String(p.platformJobId));
+  }
+
+  // C/T4 值已是加密形态（真机 job/save 就是这个形态：键名 jobId、值加密）→ 原样透传
+  {
+    const body = JSON.stringify({
+      code: 0,
+      zpData: { messages: [{ body: { resume: {
+        user: { uid: Number(REAL_UID_GEEK), name: '陈诗健' },
+        encryptUid: REAL_ENC_GEEK,
+        education: '本科', expectSalary: '20-30K', workYear: 3,
+        workExpList: [{ company: '某公司', positionName: 'Java' }],
+        jobId: REAL_JOB_ENC,
+      } } }] },
+    });
+    const h = makeHarness({
+      sourceUrl: REAL_SOURCE_URL,
+      body,
+      jobPairs: [{ num: REAL_JOB_NUM, enc: REAL_JOB_ENC }],
+      attachResponse: () => htmlResponse(),
+    });
+    await collect(h, { scene: 'chat', sourceChannel: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    const p = h.calls.submits[0].candidates[0];
+    check('C/T4 键名 jobId 但值是加密形态时不被误换（按值的形状判定，不按键名）',
+      p.platformJobId === REAL_JOB_ENC, String(p.platformJobId));
+  }
+
+  // C/T5 候选人节点上没有岗位 ID → 明确为 null（后端据此不落投递行）
+  {
+    const h = makeHarness({
+      sourceUrl: REAL_SOURCE_URL,
+      body: REAL_RESUME_BODY,
+      jobPairs: [{ num: REAL_JOB_NUM, enc: REAL_JOB_ENC }],
+      attachResponse: () => htmlResponse(),
+    });
+    await collect(h, { scene: 'chat', sourceChannel: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    const p = h.calls.submits[0].candidates[0];
+    check('C/T5 没有岗位 ID 时提交 null（不拿桥里的值硬凑）',
+      p.platformJobId === null, JSON.stringify(p.platformJobId));
+  }
+
+  // C/T6 脏配对必须被挡掉：形态不合法的配对如果混进翻译表，会把岗位译成垃圾值
+  {
+    const h = makeHarness({ sourceUrl: REAL_SOURCE_URL, attachResponse: () => htmlResponse() });
+    const m = vm.runInContext(`collectJobPairs([
+      { jobPairs: [{ num: REAL_JOB_NUM_PLACEHOLDER, enc: REAL_JOB_ENC_PLACEHOLDER }] },
+      { jobPairs: [{ num: '1', enc: REAL_JOB_ENC_PLACEHOLDER }] },        // 数字太短（状态码 0/1）
+      { jobPairs: [{ num: REAL_JOB_NUM_PLACEHOLDER, enc: 'abc' }] },      // 加密形态不合法
+      { jobPairs: [null, { num: null }, { enc: null }] },                 // 残缺
+    ])`.replace(/REAL_JOB_NUM_PLACEHOLDER/g, `'${REAL_JOB_NUM}'`)
+        .replace(/REAL_JOB_ENC_PLACEHOLDER/g, `'${REAL_JOB_ENC}'`), h.ctx);
+    check('C/T6 只有形态合法的配对进翻译表', m.size === 1 && m.get(REAL_JOB_NUM) === REAL_JOB_ENC,
+      JSON.stringify(Array.from(m.entries())));
+  }
+
+  // C/T7 归一函数的四种结局（直接打点，便于定位线上「未归类」属于哪一种）
+  {
+    const h = makeHarness({ sourceUrl: REAL_SOURCE_URL, attachResponse: () => htmlResponse() });
+    // 翻译表在 vm 内部构造：跨 realm 传 Map 会因为原型不同而 `instanceof` 判不出来，
+    // 这里直接用上下文自带的 Map 构造，跟真实调用路径一致。
+    const run = (raw, pairs) => vm.runInContext(
+      `normalizeJobId(${JSON.stringify(raw)}, new Map(Object.entries(${JSON.stringify(pairs)})))`, h.ctx);
+    const bridged = run(REAL_JOB_NUM, { [REAL_JOB_NUM]: REAL_JOB_ENC });
+    check('C/T7a 数字+有桥 → 归一', bridged.jobId === REAL_JOB_ENC && bridged.normalized === true
+      && bridged.reason === 'bridged', JSON.stringify(bridged));
+    const noBridge = run(REAL_JOB_NUM, {});
+    check('C/T7b 数字+无桥 → 原样返回数字（不丢投递）', noBridge.jobId === REAL_JOB_NUM
+      && noBridge.normalized === false && noBridge.reason === 'no-bridge', JSON.stringify(noBridge));
+    const already = run(REAL_JOB_ENC, {});
+    check('C/T7c 已是加密 → 原样', already.jobId === REAL_JOB_ENC && already.reason === 'already-encrypted',
+      JSON.stringify(already));
+    const junk = run('未知岗位', {});
+    check('C/T7d 形状都不像 ID → 原样（不臆造）', junk.jobId === '未知岗位'
+      && junk.reason === 'unrecognized-shape', JSON.stringify(junk));
+  }
+
+  // C/T8 页面侧配对扫描：只在**同一对象节点内**配对（跨节点配对 = 张冠李戴）
+  {
+    const ctx = vm.createContext({
+      rules: { job: new Set(['jobId', 'encryptJobId', 'jobIdEncrypt']) },
+      Object, String, Number,
+    });
+    ['isNumericJobId', 'isEncryptedJobId', 'pairFromNode'].forEach((fn) => {
+      vm.runInContext(sliceFunction(HOOK_SRC, fn), ctx, { filename: fn + '.js' });
+    });
+    const pair = vm.runInContext(
+      `pairFromNode({ jobId: ${Number(REAL_JOB_NUM)}, encryptJobId: '${REAL_JOB_ENC}', jobName: 'Java' })`, ctx);
+    check('C/T8 同节点两种形态 → 产出配对',
+      pair && pair.num === REAL_JOB_NUM && pair.enc === REAL_JOB_ENC, JSON.stringify(pair));
+
+    // 数字与加密分别在不同节点 → 括号里的 `pairFromNode` 只看单层，必须返回 null。
+    // 这条保证 getBossFriendListV2 这种「一个数组里塞很多岗位」的响应不会把 A 的数字配给 B。
+    const cross = vm.runInContext(
+      `pairFromNode({ jobId: ${Number(REAL_JOB_NUM)}, sub: { encryptJobId: '${REAL_JOB_ENC}' } })`, ctx);
+    check('C/T8b 跨节点的两种形态不配对（防串岗）', cross === null, JSON.stringify(cross));
+
+    const shapes = vm.runInContext(
+      `[isNumericJobId(${Number(REAL_JOB_NUM)}), isNumericJobId('1'), isNumericJobId('0'),
+        isEncryptedJobId('${REAL_JOB_ENC}'), isEncryptedJobId('${REAL_JOB_NUM}')]`, ctx);
+    check('C/T8c 形态判定：数字 9 位是、1 位不是、纯数字不是加密',
+      shapes[0] === true && shapes[1] === false && shapes[2] === false
+      && shapes[3] === true && shapes[4] === false, JSON.stringify(shapes));
+  }
+
+  // C/T9 端到端：真实形态的桥响应整份过一遍 hook 的命中扫描，
+  // 必须顺路带出配对 —— 这条断掉的话，前面 C/T1 的「有桥」在真机上根本不会发生。
+  {
+    const ctx = vm.createContext({
+      rules: {
+        resume: new Set(RESUME_KEYS),
+        noisy: new Set(['jobStatus', 'status', 'name', 'position']),
+        job: new Set(['jobId', 'encryptJobId', 'jobIdEncrypt']),
+      },
+      SCAN_DEPTH: 7, SCAN_ARRAY: 40, SCAN_BUDGET: 1200, STR_JSON_MAX: 8192,
+      JOB_PAIR_MAX: 24,
+      JSON, Object, Array, Set, Math,
+    });
+    ['isNumericJobId', 'isEncryptedJobId', 'pairFromNode', 'detectHit'].forEach((fn) => {
+      vm.runInContext(sliceFunction(HOOK_SRC, fn), ctx, { filename: fn + '.js' });
+    });
+    const out = vm.runInContext(`detectHit(JSON.parse(${JSON.stringify(REAL_BRIDGE_BODY)}))`, ctx);
+    check('C/T9 真实桥响应一次扫描带出 2 组配对',
+      out.jobPairs && out.jobPairs.length === 2, JSON.stringify(out.jobPairs));
+    check('C/T9b 岗位列表不会被误判成简历（无 resume 命中键）',
+      out.hit === '' && out.matchedKeyCount === 0, JSON.stringify(out.matchedKeys));
+  }
+}
+
 // ============================================================ 执行
 
 (async () => {
   await runPartA();
   runPartB();
+  await runPartC();
 
   const pass = results.filter((r) => r.ok).length;
   const fail = results.length - pass;

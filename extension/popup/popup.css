@@ -149,3 +149,33 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ghost:hover { background: none; color: var(--fg); text-decoration: underline; }
 
 .hint { font-size: 11px; color: var(--fg-sub); text-align: right; flex: 1; }
+
+/* ---------- 诊断录制（岗位 ID 取证） ---------- */
+.diag {
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.diag-head { display: flex; align-items: center; gap: 8px; }
+
+.diag-title { font-weight: 600; font-size: 12px; flex: 1; }
+
+.diag-status { font-size: 11px; color: var(--fg-sub); }
+
+/* 录制中是「需要你注意」的状态，用红色而不是绿 —— 绿会让人以为「没事，可以走了」 */
+.diag-status.on { color: var(--err); font-weight: 600; }
+
+.diag-hint { margin: 6px 0 8px; font-size: 11px; color: var(--fg-sub); line-height: 1.5; }
+
+.diag-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.diag-actions button { font-size: 11px; padding: 3px 8px; }
+
+.diag-msg { margin-top: 8px; font-size: 11px; line-height: 1.5; word-break: break-all; }
+
+.diag-msg.err { color: var(--err); }
+
+.diag-msg.ok { color: var(--ok); }

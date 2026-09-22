@@ -15,6 +15,25 @@
 
   <main id="list" class="list"></main>
 
+  <!-- 诊断录制：岗位 ID 取证（默认关闭，需人显式开启） -->
+  <section id="diag" class="diag">
+    <div class="diag-head">
+      <span class="diag-title">诊断录制</span>
+      <span id="diag-status" class="diag-status">读取中…</span>
+    </div>
+    <p class="diag-hint">
+      开着录制，在本页正常发一次岗位。录到的响应只存在本地，点「导出」才会下载成文件。
+    </p>
+    <div class="diag-actions">
+      <button id="btn-diag-start">开始录制</button>
+      <button id="btn-diag-stop">停止</button>
+      <button id="btn-diag-export">导出 JSON</button>
+      <button id="btn-diag-copy" title="导出失败时的兜底：直接把 JSON 放进剪贴板">复制</button>
+      <button id="btn-diag-clear">清空</button>
+    </div>
+    <div id="diag-msg" class="diag-msg" hidden></div>
+  </section>
+
   <footer class="foot">
     <button id="btn-refresh" class="ghost">刷新</button>
     <span class="hint">在平台页人工核对并提交，系统不会自动点击提交</span>

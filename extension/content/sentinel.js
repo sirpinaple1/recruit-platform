@@ -37,13 +37,118 @@
 (() => {
 'use strict';
 
+/**
+ * ★ 岗位 ID 捕获（2026-09-22 增，路径 A）★
+ *
+ * 发布成功时除了 URL，还要把「平台上的哪个岗位」一并回传，否则中台无法把
+ * 该需求单与平台岗位对应起来，采集回来的候选人投递就归不了类。
+ *
+ * 三个来源，按可信度从高到低尝试（全不中就不带 —— 由中台人工绑定兜底）：
+ *   ① job-probe.js（MAIN 世界）从 fetch/XHR 响应体里抓到的岗位 ID —— 最强证据；
+ *   ② 当前 URL 的查询参数或 job_detail 路径；
+ *   ③ DOM 上的 data-jobid / data-job-id / data-encrypt-job-id 属性。
+ *
+ * 为什么不当场把三个来源"投票"或做校验：平台形态未定，多来源可能给出不同值。
+ * 这里只做**有序尝试**，并把最终采用的来源一并上报（platformJobSource），
+ * 让中台与真机排障都能看出「这个 ID 是从哪来的」。中台一律按 auto 记录，人工可覆盖。
+ */
+
+/** 探针消息命名空间 —— 必须与 content/job-probe.js 完全一致 */
+const PROBE_NS = '__recruit_job_probe';
+const PROBE_NS_VAL = 'v1';
+
+/** 探针最近一次上报的岗位提示（内存，不落盘） */
+let jobHintFromProbe = null;
+
+/**
+ * 岗位 ID 合法性（与 job-probe.js / CollectService.looksEncryptedId 同口径）。
+ * 保守：宁可拿不到（回落人工绑定），也不要把埋点里的无关数字当岗位 ID 上报。
+ */
+function isPlausibleJobId(v) {
+  if (typeof v !== 'string') return false;
+  const s = v.trim();
+  if (!s) return false;
+  if (/^\d{1,12}$/.test(s)) return Number(s) > 0;
+  if (s.length < 16 || s.length > 64) return false;
+  let digit = false;
+  let alpha = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s.charAt(i);
+    if (c >= '0' && c <= '9') digit = true;
+    else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) alpha = true;
+    else if (c !== '_' && c !== '~' && c !== '-') return false;
+  }
+  return digit && alpha;
+}
+
+/** 来源 ②：URL 查询参数 / job_detail 路径 */
+function jobIdFromUrl() {
+  try {
+    const u = new URL(window.location.href);
+    const keys = ['jobId', 'jobid', 'encryptJobId'];
+    for (const k of keys) {
+      const v = u.searchParams.get(k);
+      if (v && isPlausibleJobId(v)) return { jobId: v.trim(), source: 'url:' + k };
+    }
+    const m = /\/job_detail\/([A-Za-z0-9_~-]{16,64})\.html/.exec(u.pathname);
+    if (m) return { jobId: m[1], source: 'url:path' };
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+/** 来源 ③：DOM 属性（平台把 ID 挂在元素上时） */
+function jobIdFromDom() {
+  const attrs = ['data-jobid', 'data-job-id', 'data-encrypt-job-id'];
+  for (const attr of attrs) {
+    try {
+      const el = document.querySelector('[' + attr + ']');
+      const v = el && el.getAttribute(attr);
+      if (v && isPlausibleJobId(v)) return { jobId: String(v).trim(), source: 'dom:' + attr };
+    } catch (e) { /* ignore */ }
+  }
+  return null;
+}
+
+/**
+ * 组装岗位 ID 上报体。三个来源有序尝试，全不中返回空对象（不带字段）。
+ * 空对象是**合法结果** —— 中台会把它当作「尚未绑定」，走人工绑定兜底，
+ * 而不是猜一个近似岗（错误归类比未归类危险）。
+ */
+function collectPlatformJobId() {
+  if (jobHintFromProbe && jobHintFromProbe.jobId) {
+    return {
+      platformJobId: jobHintFromProbe.jobId,
+      platformJobHint: jobHintFromProbe.hint || null,
+      platformJobSource: 'probe:' + (jobHintFromProbe.keyName || 'unknown'),
+    };
+  }
+  const fromUrl = jobIdFromUrl();
+  if (fromUrl) return { platformJobId: fromUrl.jobId, platformJobSource: fromUrl.source };
+  const fromDom = jobIdFromDom();
+  if (fromDom) return { platformJobId: fromDom.jobId, platformJobSource: fromDom.source };
+  return {};
+}
+
 // 全局标识避免重复注入
 const SENTINEL_ID = 'recruit-sentinel-active';
 if (window[SENTINEL_ID]) {
   console.log('[Sentinel] 已存在，跳过');
 } else {
   window[SENTINEL_ID] = true;
-  
+
+  // 接收探针的岗位提示（MAIN 世界 -> ISOLATED 世界，只有 postMessage 这一条通道）。
+  // ★ 注册位置刻意放在守卫**之内**：本文件会被 background 按每次发布任务重复注入，
+  //   若注册在守卫之外，每注入一次就多一个监听器（累积且重复打日志）。
+  window.addEventListener('message', (ev) => {
+    try {
+      const d = ev.data;
+      if (!d || typeof d !== 'object' || d[PROBE_NS] !== PROBE_NS_VAL) return;
+      if (d.type !== 'JOB_HINT' || !d.payload || !d.payload.jobId) return;
+      jobHintFromProbe = d.payload;
+      console.log('[Sentinel] 收到探针岗位提示:', d.payload.jobId, d.payload.keyName);
+    } catch (e) { /* 探针消息异常绝不能影响哨兵 */ }
+  }, false);
+
   // 从配置中读取
   const config = window.__RECRUIT_SENTINEL_CONFIG__;
   if (!config) {
@@ -125,7 +230,9 @@ function startSentinel(config) {
   // 上报成功信号（background 代理回填，见头部注释）
   async function reportSuccess() {
     const publishedUrl = window.location.href;
-    console.log('[Sentinel] 成功信号命中，上报 background 代理回填:', publishedUrl);
+    // 岗位映射（路径 A）：拿到就自动建立映射；拿不到就留空，由中台走人工绑定兜底。
+    const jobBinding = collectPlatformJobId();
+    console.log('[Sentinel] 成功信号命中，上报 background 代理回填:', publishedUrl, jobBinding);
 
     try {
       const resp = await chrome.runtime.sendMessage({
@@ -134,6 +241,7 @@ function startSentinel(config) {
           recordId,
           publishedUrl,
           platformTabId,
+          ...jobBinding,
         },
       });
       if (!resp || !resp.ok) {

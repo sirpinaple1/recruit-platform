@@ -356,6 +356,181 @@ async function submitReport(kind, fd, d, card, btnPublished, btnFailed) {
   setTimeout(fetchDrafts, 800);
 }
 
+/* ---------- 诊断录制（岗位 ID 取证） ---------- */
+
+/**
+ * 用途：BOSS 到底在哪个接口、哪个字段给出「这次发布的是哪个岗位」是未经验证的平台行为。
+ * 路径 A 若只靠猜键表就是赌博 —— 这里让人做一次真机发布、把响应全录下来，事后离线翻查。
+ *
+ * 合规：默认关闭；数据只落 chrome.storage.session（本地、会话级）；
+ *      **不自动外发任何一条**，只有人点「导出」才下载成文件。
+ */
+
+const diagEl = {
+  status: document.querySelector('#diag-status'),
+  msg: document.querySelector('#diag-msg'),
+  start: document.querySelector('#btn-diag-start'),
+  stop: document.querySelector('#btn-diag-stop'),
+  export: document.querySelector('#btn-diag-export'),
+  copy: document.querySelector('#btn-diag-copy'),
+  clear: document.querySelector('#btn-diag-clear'),
+};
+
+function diagMsg(text, kind) {
+  diagEl.msg.hidden = !text;
+  diagEl.msg.className = 'diag-msg' + (kind ? ' ' + kind : '');
+  diagEl.msg.textContent = text || '';
+}
+
+function fmtKb(bytes) {
+  if (!bytes) return '0 KB';
+  return bytes < 1024 * 1024
+    ? Math.round(bytes / 1024) + ' KB'
+    : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function diagRefresh() {
+  try {
+    const s = await chrome.runtime.sendMessage({ type: 'DIAG_STATUS' });
+    if (!s || !s.ok) {
+      diagEl.status.textContent = '状态读取失败';
+      return;
+    }
+    diagEl.status.textContent = (s.recording ? '录制中 · ' : '未开始 · ')
+      + s.count + ' 条 / ' + fmtKb(s.bytes)
+      + (s.recording && !s.registered ? ' · ⚠️ 脚本未注册' : '')
+      + (s.trimmed ? '（已丢弃最早 ' + s.trimmed + ' 条）' : '');
+    diagEl.status.className = 'diag-status' + (s.recording ? ' on' : '');
+  } catch (e) {
+    diagEl.status.textContent = '状态读取失败';
+  }
+}
+
+/** 取当前活动 tab；录制必须在 zhipin 页面上才有意义 */
+async function activeZhipinTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs && tabs[0];
+  if (!tab) return null;
+  if (!/^https?:\/\/([^/]*\.)?zhipin\.com\//.test(tab.url || '')) return null;
+  return tab;
+}
+
+diagEl.start.addEventListener('click', async () => {
+  diagMsg('');
+  const tab = await activeZhipinTab();
+  if (!tab) {
+    diagMsg('请先切到 BOSS 页面再点开始录制（录制只在该页生效）', 'err');
+    return;
+  }
+  diagEl.start.disabled = true;
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'DIAG_START', payload: { tabId: tab.id } });
+    if (!r || !r.ok) {
+      diagMsg('启动失败：' + ((r && r.error) || '未知错误'), 'err');
+      return;
+    }
+    diagMsg(r.injected
+      ? '已开始录制：当前页面已注入，且之后打开的每个 BOSS 页面都会自动带上探针。'
+        + '现在正常发一次岗位，完成后回来点「导出 JSON」。'
+      : '录制开关已打开，但当前页面注入未全部成功 —— 当前页可能录不到（刷新该页即可，'
+        + '之后加载的页面不受影响）。',
+      r.injected ? 'ok' : 'err');
+    await diagRefresh();
+  } catch (e) {
+    diagMsg('启动失败：' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    diagEl.start.disabled = false;
+  }
+});
+
+diagEl.stop.addEventListener('click', async () => {
+  diagEl.stop.disabled = true;
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'DIAG_STOP' });
+    diagMsg(r && r.ok ? ('已停止，共录到 ' + r.count + ' 条，可导出。') : '停止失败', r && r.ok ? 'ok' : 'err');
+    await diagRefresh();
+  } catch (e) {
+    diagMsg('停止失败：' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    diagEl.stop.disabled = false;
+  }
+});
+
+diagEl.clear.addEventListener('click', async () => {
+  diagEl.clear.disabled = true;
+  try {
+    await chrome.runtime.sendMessage({ type: 'DIAG_CLEAR' });
+    diagMsg('已清空录制内容。');
+    await diagRefresh();
+  } catch (e) {
+    diagMsg('清空失败：' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    diagEl.clear.disabled = false;
+  }
+});
+
+diagEl.export.addEventListener('click', async () => {
+  diagEl.export.disabled = true;
+  try {
+    const data = await chrome.runtime.sendMessage({ type: 'DIAG_EXPORT' });
+    if (!data || !data.ok) {
+      diagMsg('导出失败：' + ((data && data.error) || '未知错误'), 'err');
+      return;
+    }
+    if (!data.count) {
+      diagMsg('还没有录到内容。先点「开始录制」，然后在 BOSS 页面操作。', 'err');
+      return;
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'recruit-job-probe-' + stamp + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // 立刻 revoke 会打断下载，延后释放
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    diagMsg('已导出 ' + data.count + ' 条到下载目录。', 'ok');
+  } catch (e) {
+    diagMsg('导出失败：' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    diagEl.export.disabled = false;
+  }
+});
+
+// 录制时条数在涨，popup 开着就 2s 刷一次状态（popup 关掉自然停）
+setInterval(diagRefresh, 2000);
+void diagRefresh();
+
+/**
+ * 导出兜底：把 JSON 放进剪贴板。
+ *
+ * 为什么必须有这一条：popup 是个**会被点击外部就关闭**的页面，
+ * 而大文件的 blob 下载要等浏览器接手下发；popup 一关，下载有可能没起来，
+ * 表现成「点了导出但下载目录里什么都没有」—— 实测就卡在这一步。
+ * 剪贴板是同步写入的，不依赖页面活着；拿到文本后粘进任意文件即可。
+ */
+diagEl.copy.addEventListener('click', async () => {
+  diagEl.copy.disabled = true;
+  try {
+    const data = await chrome.runtime.sendMessage({ type: 'DIAG_EXPORT' });
+    if (!data || !data.ok || !data.count) {
+      diagMsg('没有可复制的内容（先开始录制并在 BOSS 页面操作）', 'err');
+      return;
+    }
+    const text = JSON.stringify(data);
+    await navigator.clipboard.writeText(text);
+    diagMsg('已复制 ' + data.count + ' 条（' + Math.round(text.length / 1024)
+      + ' KB）到剪贴板。粘到一个 .json 文件里即可。', 'ok');
+  } catch (e) {
+    diagMsg('复制失败：' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    diagEl.copy.disabled = false;
+  }
+});
+
 /* ---------- 事件绑定 ---------- */
 
 document.querySelector('#btn-settings').addEventListener('click', () => chrome.runtime.openOptionsPage());

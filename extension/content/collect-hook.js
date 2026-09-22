@@ -41,7 +41,24 @@
    * 后端可通过 'SET_RULES' 指令覆盖（逻辑后置，平台改版不用发版扩展）。
    */
   const DEFAULT_RULES = {
-    version: 'local-boss-20260921-V2',
+    version: 'local-boss-20260922-V3',
+    /**
+     * 岗位 ID 键（兜底；后端 CollectRules.JOB_ID_KEYS 为真源）。
+     *
+     * ★ 为什么这里要单独留一份「数字 ↔ 加密」配对扫描 ★
+     *   真机取证（2026-09-22）：BOSS 的岗位 ID 有**两套 ID 空间** ——
+     *     · 数字 jobId 575500411      → 只出现在聊天/候选人侧
+     *     · 加密 encryptJobId 352f9…  → 只出现在职位管理侧（含发布响应 job/save）
+     *   而简历采集拿到的 body.resume.jobId 是**数字**，发布台账记的是**加密**，
+     *   两者永不相等 → 映射永远解析不到。唯一出路是拿「同一个对象里同时出现两种形态」
+     *   的配对做翻译（实测 getBossFriendListV2 / chatted/jobList 613 次同框）。
+     *   这个扫描必须发生在**页面侧**：只有页面看得到这些响应，
+     *   而且必须与简历命中判定同一次遍历完成（响应体最大 256KB，扫两遍不划算）。
+     *
+     * ⚠️ 注意：jobId 这个键名**本身不可信** —— job/data/list 里它是数字、
+     *   job/save 里它是加密。所以判定一律**按值的形态**，不按键名。
+     */
+    jobIdKeys: ['jobId', 'encryptJobId', 'jobIdEncrypt'],
     resumeKeys: [
       'geekName', 'expectSalary', 'geekCard', 'advantage',
       'workExp', 'eduExp', 'workExpList', 'eduExpList',
@@ -64,12 +81,15 @@
   function compileRules(raw) {
     const resume = new Set(raw.resumeKeys || []);
     const noisy = new Set(raw.noisyKeys || []);
+    const job = new Set(raw.jobIdKeys || DEFAULT_RULES.jobIdKeys);
     return {
       version: raw.version || 'unknown',
       resumeKeys: raw.resumeKeys || [],
       noisyKeys: raw.noisyKeys || [],
+      jobIdKeys: raw.jobIdKeys || DEFAULT_RULES.jobIdKeys,
       resume,
       noisy,
+      job,
       attachUrlRe: raw.attachUrlPattern ? new RegExp(raw.attachUrlPattern, 'i') : /$^/,
       attachCtRe: raw.attachContentTypePattern ? new RegExp(raw.attachContentTypePattern, 'i') : /$^/,
       noisePrefixes: raw.noisePathPrefixes || []
@@ -140,13 +160,59 @@
     return { text: s.slice(0, max), truncated: true, chars: s.length };
   }
 
+  // ============================================================ 岗位 ID 形态判定
+
+  /**
+   * 数字形态岗位 ID（如 575500411）。
+   * 下限取 6 位：与 background.js 的 looksNumericId 同口径，避免把「状态码 0/1」当 ID。
+   */
+  function isNumericJobId(v) {
+    if (typeof v === 'number') return Number.isInteger(v) && v > 0 && String(v).length >= 6;
+    if (typeof v !== 'string') return false;
+    const s = v.trim();
+    return /^\d{6,15}$/.test(s) && Number(s) > 0;
+  }
+
+  /** 加密形态岗位 ID（如 352f92eda67db1080nN_3t29FFNR）—— 大小写+数字混合、16~64 位 */
+  function isEncryptedJobId(v) {
+    if (typeof v !== 'string') return false;
+    const s = v.trim();
+    if (!/^[0-9A-Za-z_~-]{16,64}$/.test(s)) return false;
+    return /[0-9]/.test(s) && /[A-Za-z]/.test(s);
+  }
+
+  /** 单条响应最多保留多少组配对（一个人一次采集用不到几组，多了纯占内存） */
+  const JOB_PAIR_MAX = 24;
+
+  /**
+   * 从一个**对象节点**里找「数字 ↔ 加密」同框配对。
+   *
+   * 为什么必须在同一节点内：不同节点的两个岗位 ID 拼出来的配对是**假的** ——
+   * 那会把 A 岗位的数字 ID 安到 B 岗位的加密 ID 上，直接造成候选人归错岗。
+   * 真机实测的 613 次同框就是这种同节点配对。
+   */
+  function pairFromNode(node) {
+    let num = null;
+    let enc = null;
+    try {
+      for (const k of Object.keys(node)) {
+        if (!rules.job.has(k)) continue;
+        const v = node[k];
+        if (num === null && isNumericJobId(v)) num = String(v).trim();
+        else if (enc === null && isEncryptedJobId(v)) enc = String(v).trim();
+      }
+    } catch (e) { return null; }
+    return (num && enc) ? { num, enc } : null;
+  }
+
   // ============================================================ 命中探测
 
   function detectHit(root) {
     const matched = new Set();
     const noisy = new Set();
+    const jobPairs = [];
     if (!root || typeof root !== 'object') {
-      return { hit: '', matchedKeys: [], matchedKeyCount: 0, noisyKeys: [] };
+      return { hit: '', matchedKeys: [], matchedKeyCount: 0, noisyKeys: [], jobPairs };
     }
     let budget = SCAN_BUDGET;
     const seen = new Set();
@@ -166,6 +232,12 @@
       }
       let keys;
       try { keys = Object.keys(node); } catch (e) { continue; }
+      // 顺路做岗位 ID 配对（同一节点内的 数字↔加密）。
+      // 放在 keys 循环之前：Object.keys 已经拿到了，避免再遍历一次。
+      if (jobPairs.length < JOB_PAIR_MAX) {
+        const pair = pairFromNode(node);
+        if (pair) jobPairs.push(pair);
+      }
       for (let i = 0; i < keys.length; i += 1) {
         const k = keys[i];
         if (rules.resume.has(k)) matched.add(k);
@@ -189,7 +261,8 @@
       hit: keys.length ? 'resume' : '',
       matchedKeys: keys.slice(0, 24),
       matchedKeyCount: keys.length,
-      noisyKeys: Array.from(noisy).slice(0, 24)
+      noisyKeys: Array.from(noisy).slice(0, 24),
+      jobPairs
     };
   }
 
@@ -326,7 +399,8 @@
           hit: probe ? probe.hit : '',
           matchedKeys: probe ? probe.matchedKeys : [],
           matchedKeyCount: probe ? probe.matchedKeyCount : 0,
-          noisyKeys: probe ? probe.noisyKeys : []
+          noisyKeys: probe ? probe.noisyKeys : [],
+          jobPairs: probe ? probe.jobPairs : []
         }));
       } catch (e) { markError('fetch-body', e); }
     }).catch((e) => { markError('fetch-text', e); });
@@ -432,7 +506,8 @@
           hit: probe ? probe.hit : '',
           matchedKeys: probe ? probe.matchedKeys : [],
           matchedKeyCount: probe ? probe.matchedKeyCount : 0,
-          noisyKeys: probe ? probe.noisyKeys : []
+          noisyKeys: probe ? probe.noisyKeys : [],
+          jobPairs: probe ? probe.jobPairs : []
         }));
       } catch (e) { markError('xhr-parse', e); }
     }, 0);
@@ -569,6 +644,25 @@
       attachOut.push(d);
     });
 
+    // 岗位 ID「数字 ↔ 加密」配对：跨整条环形缓冲汇总（桥端点可能在页面加载时就到了，
+    // 远早于 HR 点采集，所以不能只取最近几条）。逐条响应内已去重，这里再全局去重。
+    const JOB_PAIR_OUT_MAX = 60;
+    const pairSeen = new Set();
+    const pairOut = [];
+    for (let i = ring.length - 1; i >= 0 && pairOut.length < JOB_PAIR_OUT_MAX; i -= 1) {
+      const ps = ring[i] && ring[i].jobPairs;
+      if (!ps || !ps.length) continue;
+      for (let j = 0; j < ps.length; j += 1) {
+        const pr = ps[j];
+        if (!pr || !pr.num || !pr.enc) continue;
+        const key = pr.num + '|' + pr.enc;
+        if (pairSeen.has(key)) continue;
+        pairSeen.add(key);
+        pairOut.push({ num: pr.num, enc: pr.enc });
+        if (pairOut.length >= JOB_PAIR_OUT_MAX) break;
+      }
+    }
+
     return {
       empty: recent.length === 0 && attachOut.length === 0,
       scene: scene || 'chat',
@@ -579,6 +673,8 @@
       selfUidHint: findSelfUidHint(),
       // 按命中键数量降序的多条候选：背景脚本用「字段取最丰富的、身份取带加密 ID 的」
       captures: recent,
+      // 岗位 ID 两套形态的翻译表（同节点同框配对），供采集侧把数字 ID 归一成加密形态
+      jobPairs: pairOut,
       attachments: attachOut,
       ringSize: ring.length,
       hitCount: hits.length
