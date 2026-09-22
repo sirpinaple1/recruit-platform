@@ -40,6 +40,35 @@
 **用户侧处置**：刷新页面即可。若刷新后仍无效，确认 `chrome://extensions` 里扩展是启用状态、
 且中台 origin 命中 `matches`。
 
+### 0.1 选项页「测试连接」报 `Failed to fetch`
+
+> 2026-09-22 实测：后端地址填 `http://118.145.246.201`，点测试连接提示
+> `无法连接后端（Failed to fetch），请检查地址与后端服务`；但同一地址 `curl` 能正常返回 401。
+
+**不要被这句提示误导** —— 它不表示后端挂了，而是「浏览器在发请求之前就被拦下了」。
+按顺序排除：
+
+1. **CORS（已修）**：后端此前完全没有 CORS 配置。扩展跑在 `chrome-extension://<id>` 源下，
+   属跨域；且 `X-Extension-Token` 是自定义头会触发预检 `OPTIONS`。
+   现已在 `WebMvcConfig` 放行 `/api/ext/**`、`/api/extension/**`，并在三个拦截器里放行 OPTIONS 预检。
+   自检：
+   ```bash
+   curl -i -X OPTIONS -H "Origin: chrome-extension://probe" \
+        -H "Access-Control-Request-Method: GET" \
+        -H "Access-Control-Request-Headers: x-extension-token" \
+        http://<host>/api/ext/drafts
+   ```
+   期望 `HTTP/1.1 200` 且带 `Access-Control-Allow-Origin: chrome-extension://probe`。
+   若返回 **401/403 且带业务 JSON body**，说明预检被拦截器拦了，浏览器会直接放弃。
+2. **扩展 host_permissions**：manifest 里必须有目标 origin；改完必须在
+   `chrome://extensions` 点 🔄 重载才是生效的那个 manifest。
+3. **地址本身**：`curl -s -o /dev/null -w '%{http_code}' http://<host>/api/health` 应为 200。
+
+> 三者症状完全一样（都是 Failed to fetch），curl 却是正常的 —— 这类「服务端干净、浏览器失败」
+> 的故障，先怀疑 CORS 与权限，而不是后端服务。
+
+---
+
 ### 一条命令自检 content script 是否注入
 
 在中台页面 Console 里执行：
