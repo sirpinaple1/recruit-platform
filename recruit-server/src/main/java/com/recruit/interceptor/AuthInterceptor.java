@@ -8,6 +8,7 @@ import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -25,6 +26,10 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // CORS 预检（OPTIONS）不带 Authorization：放行，由 Spring MVC 返回 CORS 头
+        if (HttpMethod.OPTIONS.matches(request.getMethod())) {
+            return true;
+        }
         String auth = request.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) {
             return reject(response);

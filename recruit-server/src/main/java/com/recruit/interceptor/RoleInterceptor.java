@@ -8,6 +8,7 @@ import com.recruit.service.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
@@ -44,6 +45,10 @@ public class RoleInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // CORS 预检（OPTIONS）不放行的话会被userId 缺失判成 401，浏览器的预检直接失败
+        if (HttpMethod.OPTIONS.matches(request.getMethod())) {
+            return true;
+        }
         if (!(handler instanceof HandlerMethod handlerMethod)) {
             return true;
         }

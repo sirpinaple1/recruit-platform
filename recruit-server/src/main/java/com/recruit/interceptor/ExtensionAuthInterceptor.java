@@ -7,6 +7,7 @@ import com.recruit.service.ExtensionTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -30,6 +31,11 @@ public class ExtensionAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // CORS 预检（OPTIONS）按规范不携带鉴权头，交给 Spring MVC 的 PreFlight 处理返回 CORS 头。
+        // 不拦截预检：否则浏览器连正式请求都不会发出，扩展侧只能看到一句 Failed to fetch。
+        if (HttpMethod.OPTIONS.matches(request.getMethod())) {
+            return true;
+        }
         String token = request.getHeader(HEADER);
         if (!StringUtils.hasText(token)) {
             return reject(response);
