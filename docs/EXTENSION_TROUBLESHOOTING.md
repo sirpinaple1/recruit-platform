@@ -73,7 +73,7 @@
 
 > 2026-09-22 实测：本机同时存在两份克隆 —— `~/recruit-platform` 与 `~/recruit-platform-github`。
 > 代码改在前者，Chrome 加载的却是后者的 `extension/`，于是「改了、重载了、还是不行」，
-> 控制台里打印的还是旧代码。
+> 控制台里打印的还是旧代码。（冗余那份已于同日清理，全机只保留 `~/recruit-platform-github`。）
 
 **不要靠猜**，直接问浏览器。Chrome 把已加载的扩展记录在
 `~/Library/Application Support/Google/Chrome/<Profile>/Secure Preferences` 里
