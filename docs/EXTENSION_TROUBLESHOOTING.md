@@ -103,6 +103,49 @@ diff -r ~/recruit-platform/extension ~/recruit-platform-github/extension && echo
 
 ---
 
+### 0.3 控制台报 `Identifier 'xxx' has already been declared`
+
+> 2026-09-22 事故：给 message-relay 与 bridge 都加了上下文存活检测后，页面报
+> `Uncaught SyntaxError: Identifier 'contextDead' has already been declared (at bridge.js:1:1)`，
+> **bridge 整支脚本没有运行** → 页面收不到 EXT_READY → 又变成「检测不到插件」。
+
+**根因**：同一个 `content_scripts` 条目里的多个 `js` 文件，注入的是
+**同一个隔离世界（isolated world）**，顶层作用域是共享的。两个文件各自写
+`let contextDead` 就等于在同一作用域重复声明 —— 后执行的那支直接抛语法错误，
+整支不运行（前面的 `if (window[FLAG]) return` 守卫也救不了，因为语法错误发生在
+更早的解析阶段）。
+
+**规矩**：extension/content/ 下的每个文件都必须整体包在 IIFE 里，不向顶层泄漏任何标识符。
+
+```js
+(() => {
+  'use strict';
+  // ... 全部逻辑
+})();
+```
+
+同世界的文件组合（现状）：
+| 世界 | 文件组合 |
+|---|---|
+| 中台页面（5173/5176/118.145.246.201） | `message-relay.js` + `bridge.js` |
+| BOSS 发布页 | `message-relay.js` + `sentinel.js` |
+| BOSS 聊天/简历页 | `collect-bridge.js` + `collect-hook.js`(MAIN 世界，独立) + `collect-button.js` |
+
+**回归测试**（改完 content script 先跑它，比在浏览器里点一遍快）：
+
+```bash
+node test/extension-content-world-verify.cjs
+```
+
+它把 message-relay.js 与 bridge.js 注入**同一个 vm 上下文**（复现真实隔离世界），验证 11 项：
+正序/反序注入不抛错、EXT_READY 与换权通知正常发出、FILL_REQUEST 恰好转发一次（不双发）、
+页面原始消息不被 relay 直接转发、重复注入时心跳与监听器不叠加。
+
+> ⚠️ 这是「内容脚本互相打架」的典型形态，和 §0.2 的多份克隆一样，症状都是
+> 「代码明明改了却没生效」，而报错位置（`bridge.js:1:1`）往往指向不了真凶。
+
+---
+
 ### 一条命令自检 content script 是否注入
 
 在中台页面 Console 里执行：

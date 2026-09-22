@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "招聘发布助手",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "渠道发布中台浏览器扩展：拉取待发布草稿、一键填充发布页、回填发布结果；简历采集（逐条主动采集候选人简历入库，附件支持无预览主动探测）",
   "permissions": [
     "storage",
