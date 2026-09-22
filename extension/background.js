@@ -19,8 +19,46 @@
  */
 'use strict';
 
-/** 中台 API 基础地址 */
-const API_BASE = 'http://localhost:6017';
+/** 中台 API 默认地址（未配置时的回退值，本地联调用） */
+const DEFAULT_API_BASE = 'http://localhost:6017';
+
+/**
+ * 已配置后端地址的缓存。
+ * MV3 的 service worker 30s 空闲即被回收，缓存只用于降低同一轮调用里的
+ * storage 读取次数；storage 变化时立即失效（见下方 onChanged）。
+ */
+let cachedApiBase = null;
+
+/** 归一化后端地址：去首尾空白与尾部斜杠 */
+function normalizeApiBase(raw) {
+  return String(raw || '').trim().replace(/\/+$/, '');
+}
+
+/**
+ * 取当前生效的中台 API 地址：以配置页（options/index.html）保存的 baseUrl 为准，
+ * 未配置时回退到 localhost:6017。
+ *
+ * 背景：部署到远端服务器后后台地址不再是本机，写死常量会导致 background 侧所有
+ * 请求（换权 / 拉草稿 / 回填 / 采集入库）仍然打到 localhost 而失败。
+ */
+async function getApiBase() {
+  if (cachedApiBase) return cachedApiBase;
+  try {
+    const stored = await chrome.storage.local.get('baseUrl');
+    cachedApiBase = normalizeApiBase(stored.baseUrl) || DEFAULT_API_BASE;
+  } catch (e) {
+    console.warn('[Background] 读取后端地址失败，回退默认值:', e);
+    cachedApiBase = DEFAULT_API_BASE;
+  }
+  return cachedApiBase;
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.baseUrl) {
+    cachedApiBase = normalizeApiBase(changes.baseUrl.newValue) || DEFAULT_API_BASE;
+    console.log('[Background] 后端地址已切换为:', cachedApiBase);
+  }
+});
 
 /** 等待表单 frame 就绪的上限（BOSS 表单在 iframe 里，frame 晚于壳页面建立） */
 const FILL_WAIT_FRAME_MS = 12000;
@@ -169,7 +207,7 @@ async function exchangeToken(platformToken) {
   const oldToken = stored.ext_token || null;
   
   // 2. 调用接口（使用中台 JWT token 认证）
-  const resp = await fetch(`${API_BASE}/api/extension/session-token`, {
+  const resp = await fetch(`${await getApiBase()}/api/extension/session-token`, {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
@@ -236,7 +274,7 @@ async function handleFillRequest(recordId, sourceTabId) {
   });
   
   // 3. 调用 /api/ext/drafts 获取所有待发布草稿
-  const resp = await fetch(`${API_BASE}/api/ext/drafts?status=pending`, {
+  const resp = await fetch(`${await getApiBase()}/api/ext/drafts?status=pending`, {
     method: 'GET',
     headers: {
       'X-Extension-Token': token,
@@ -387,7 +425,7 @@ async function reportPublishSuccess(recordId, publishedUrl) {
   const token = stored.ext_token;
   if (!token) throw new Error('未找到扩展 token，无法回填');
 
-  const resp = await fetch(`${API_BASE}/api/ext/records/${recordId}/report`, {
+  const resp = await fetch(`${await getApiBase()}/api/ext/records/${recordId}/report`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -624,7 +662,7 @@ async function getExtToken() {
 
 /** 拉取采集规则（后端下发，逻辑后置；失败不阻塞采集，用 hook 内置兜底） */
 async function fetchCollectRules(token) {
-  const resp = await fetch(`${API_BASE}/api/ext/collect/rules`, {
+  const resp = await fetch(`${await getApiBase()}/api/ext/collect/rules`, {
     method: 'GET',
     headers: { 'X-Extension-Token': token },
   });
@@ -1244,7 +1282,7 @@ async function reportAttachmentSkips(token, info) {
   const note = ('候选人ID=' + (info.candidateIds || []).join(',')
     + '；被拒附件=' + (info.urls || []).join(' | ')).slice(0, 512);
   try {
-    await fetch(`${API_BASE}/api/ext/collect/audit`, {
+    await fetch(`${await getApiBase()}/api/ext/collect/audit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Extension-Token': token },
       body: JSON.stringify({
@@ -1469,7 +1507,7 @@ async function downloadAndUploadAttachment(attachmentId, att, token) {
     const filename = guessAttachmentName(att, ct);
     const fd = new FormData();
     fd.append('file', blob, filename);
-    const up = await fetch(`${API_BASE}/api/ext/collect/attachments/${attachmentId}/content`, {
+    const up = await fetch(`${await getApiBase()}/api/ext/collect/attachments/${attachmentId}/content`, {
       method: 'POST',
       headers: { 'X-Extension-Token': token },
       body: fd,
@@ -1484,7 +1522,7 @@ async function downloadAndUploadAttachment(attachmentId, att, token) {
     const reason = String((e && e.message) || e).slice(0, 500);
     console.warn('[Background] 附件下载/上传失败:', attachmentId, reason);
     try {
-      await fetch(`${API_BASE}/api/ext/collect/attachments/${attachmentId}/fail`, {
+      await fetch(`${await getApiBase()}/api/ext/collect/attachments/${attachmentId}/fail`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Extension-Token': token },
         body: JSON.stringify({ reason }),
@@ -1749,7 +1787,7 @@ async function handleCollectRequest(payload, tabId) {
   };
 
   // 4) 提交入库（服务端在同一事务内做三级幂等 + 写审计）
-  const submitResp = await fetch(`${API_BASE}/api/ext/collect/resumes`, {
+  const submitResp = await fetch(`${await getApiBase()}/api/ext/collect/resumes`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

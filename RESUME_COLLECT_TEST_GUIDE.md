@@ -10,12 +10,14 @@
 | MySQL | `127.0.0.1:3307`（docker `recruit-mysql`），库 `recruit_platform` | `docker ps` 应见 healthy |
 | Redis | `127.0.0.1:6380` | 同上 |
 | 后端 | http://localhost:6017 | `curl -s -o /dev/null -w '%{http_code}' http://localhost:6017/api/health` → 200 |
-| 前端 | **http://localhost:5176** | 同上探测 200 |
-| 扩展 | `chrome://extensions` → 招聘发布助手 v0.2.0 | 加载 `extension/` 目录 |
+| 前端 | http://localhost:5173（本地）；http://118.145.246.201（已部署） | 同上探测 200 |
+| 扩展 | `chrome://extensions` → 招聘发布助手 v0.2.3 | 加载 `extension/` 目录 |
 
-> ⚠️ 前端必须跑在 **5176**：扩展 `manifest.json` 的 `host_permissions` 与注入匹配都写死了
-> `http://localhost:5176/*`。Vite 配置里的端口是 5173，被占用时会自增 —— 若自增到别的端口，
-> **零配置换权会静默失效**（bridge 不会被注入），扩展拿不到 token。启动后先确认端口。
+> ⚠️ 前端跑在哪个 origin，`extension/manifest.json` 的 `content_scripts.matches` 就必须覆盖到，
+> 否则 **content script 不会注入**，bridge 不工作，零配置换权静默失效。
+> 2026-09-21 起已覆盖：`localhost/127.0.0.1:5173`、`localhost/127.0.0.1:5176`、部署机 `118.145.246.201`。
+> Vite 的 `server.port` 是 5173，端口被占用会自增 —— 自增到清单外的端口时，需把该 origin 补进
+> manifest 的 `content_scripts.matches` 与 `host_permissions`（排障见 `docs/EXTENSION_TROUBLESHOOTING.md`）。
 
 | 账号 | 密码 | 角色 |
 |---|---|---|

@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast';
  * 
  * 页面 → 扩展：FILL_REQUEST
  * 扩展 → 页面：EXT_READY / FILL_PROGRESS / FILL_RESULT / PUBLISH_BACK
+ * 扩展 → 页面：EXT_UNAVAILABLE（扩展被重载后 content script 成为孤儿时的兜底通知）
  */
 
 export type ExtensionMessageType = 
@@ -14,7 +15,8 @@ export type ExtensionMessageType =
   | 'EXT_READY'
   | 'FILL_PROGRESS'
   | 'FILL_RESULT'
-  | 'PUBLISH_BACK';
+  | 'PUBLISH_BACK'
+  | 'EXT_UNAVAILABLE';
 
 export interface ExtensionMessage<T = unknown> {
   source: 'recruit-platform' | 'recruit-extension';
@@ -28,6 +30,11 @@ export interface FillRequestPayload {
 
 export interface ExtReadyPayload {
   version: string;
+}
+
+/** 扩展上下文失效通知的载荷（2026-09-21 新增） */
+export interface ExtUnavailablePayload {
+  reason?: string;
 }
 
 export interface FillProgressPayload {
@@ -53,6 +60,7 @@ export interface PublishBackPayload {
  */
 export type ButtonState = 
   | 'not_installed'  // 未安装：15s 未收到心跳
+  | 'stale'          // 需刷新：收到 EXT_UNAVAILABLE（扩展刚被重载，页面需刷新重新注入）
   | 'ready'          // 就绪：收到 EXT_READY
   | 'filling'        // 填充中：发送 FILL_REQUEST 后
   | 'filled'         // 待提交：收到 FILL_RESULT 且 updated > 0
@@ -79,6 +87,8 @@ export function useExtensionBridge() {
   const buttonState: Ref<ButtonState> = ref('not_installed');
   const extensionVersion: Ref<string> = ref('');
   const lastHeartbeat: Ref<number> = ref(0);
+  /** 扩展不可用（上下文失效）的原因，用于在 UI 上给出可操作提示 */
+  const extensionHint: Ref<string> = ref('');
   const { success, error } = useToast();
   
   // 记录每个 recordId 的填充状态
@@ -102,6 +112,17 @@ export function useExtensionBridge() {
         loading: false,
         text: '发布到 BOSS',
         tooltip: '未检测到发布助手，点击查看安装指引',
+      };
+    }
+
+    // 扩展被重载过：页面里跑的还是旧的 content script，必须刷新页面才能重新注入
+    if (globalState === 'stale') {
+      return {
+        state: 'stale',
+        disabled: true,
+        loading: false,
+        text: '发布到 BOSS',
+        tooltip: extensionHint.value || '扩展刚更新过，请刷新本页面后重试',
       };
     }
 
@@ -197,6 +218,20 @@ export function useExtensionBridge() {
         break;
       }
 
+      case 'EXT_UNAVAILABLE': {
+        // 扩展重载/更新后，页面内的 content script 已成为孤儿（chrome.runtime.id 置空），
+        // 必须刷新页面才能重新注入 —— 这里给出明确的可操作提示，而不是笼统的"未安装"
+        const payload = (message.payload || {}) as ExtUnavailablePayload;
+        buttonState.value = 'stale';
+        extensionHint.value = '扩展刚更新过，请刷新本页面后重试';
+        if (heartbeatTimer) {
+          clearTimeout(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        console.warn('⚠️ 扩展上下文已失效，需要刷新页面', { reason: payload.reason });
+        break;
+      }
+
       case 'FILL_PROGRESS': {
         const payload = message.payload as FillProgressPayload;
         // 只有当前状态不是终态时才更新为 filling
@@ -246,9 +281,9 @@ export function useExtensionBridge() {
   onMounted(() => {
     window.addEventListener('message', handleExtensionMessage);
     
-    // 初始判定为未安装，等待首次心跳
+    // 初始判定为未安装，等待首次心跳（已确认失效的情况下保持 stale，不覆盖）
     heartbeatTimer = setTimeout(() => {
-      if (buttonState.value !== 'ready') {
+      if (buttonState.value !== 'ready' && buttonState.value !== 'stale') {
         buttonState.value = 'not_installed';
       }
     }, 15000);
@@ -264,6 +299,7 @@ export function useExtensionBridge() {
   return {
     buttonState,
     extensionVersion,
+    extensionHint,
     getButtonState,
     sendFillRequest,
   };

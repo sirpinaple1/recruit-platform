@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "招聘发布助手",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "渠道发布中台浏览器扩展：拉取待发布草稿、一键填充发布页、回填发布结果；简历采集（逐条主动采集候选人简历入库，附件支持无预览主动探测）",
   "permissions": [
     "storage",
@@ -11,7 +11,12 @@
   ],
   "host_permissions": [
     "http://localhost:6017/*",
+    "http://127.0.0.1:6017/*",
+    "http://localhost:5173/*",
+    "http://127.0.0.1:5173/*",
     "http://localhost:5176/*",
+    "http://127.0.0.1:5176/*",
+    "http://118.145.246.201/*",
     "https://www.zhipin.com/*",
     "http://*.zhipin.com/*",
     "https://*.zhipin.com/*"
@@ -22,7 +27,11 @@
   "content_scripts": [
     {
       "matches": [
-        "http://localhost:5176/*"
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*",
+        "http://localhost:5176/*",
+        "http://127.0.0.1:5176/*",
+        "http://118.145.246.201/*"
       ],
       "js": [
         "content/message-relay.js",
