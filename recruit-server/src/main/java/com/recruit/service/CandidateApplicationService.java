@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.recruit.entity.CandidateApplication;
 import com.recruit.entity.Channel;
+import com.recruit.entity.HrRequest;
 import com.recruit.entity.PublishRecord;
 import com.recruit.mapper.CandidateApplicationMapper;
 import com.recruit.mapper.ChannelMapper;
+import com.recruit.mapper.HrRequestMapper;
 import com.recruit.mapper.PublishRecordMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -19,6 +21,8 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 候选人投递事实（candidate_application）的唯一写入与解析入口。
@@ -40,8 +44,9 @@ import java.util.Map;
  *       <td>本表的 UNIQUE (platform, candidate_id, platform_job_id)</td></tr>
  *   <tr><td>投递的 request_id 与映射永远一致</td>
  *       <td><b>request_id 是派生值</b>：改映射时级联重算，而不是让历史行留旧值</td></tr>
- *   <tr><td>映射未知时不会瞎猜</td>
- *       <td>解析不到就写 NULL，绝不按标题模糊匹配（标题会漂移）</td></tr>
+ *   <tr><td>映射未知时不瞎猜近似岗</td>
+ *       <td>精确 ID 解析不到时，先走「同名岗位兜底」（见 {@link #resolveRequestIdByName}，
+ *           排除法 + 唯一才认）；仍解析不到才写 NULL —— 模糊/多义匹配永远不做</td></tr>
  * </table>
  *
  * <p><b>为什么级联重算是 UPDATE 而不是删了重建</b>：投递的「事实」部分是
@@ -56,6 +61,7 @@ public class CandidateApplicationService {
     private final CandidateApplicationMapper applicationMapper;
     private final ChannelMapper channelMapper;
     private final PublishRecordMapper publishRecordMapper;
+    private final HrRequestMapper hrRequestMapper;
 
     // ==================================================================
     // 1) 落事实（采集侧调用）
@@ -101,6 +107,9 @@ public class CandidateApplicationService {
             // 自愈：映射可能是「先采集、后绑定」才出现的
             if (existing.getRequestId() == null) {
                 Long resolved = resolveRequestId(platform, jobId);
+                if (resolved == null) {
+                    resolved = resolveRequestIdByName(platformJobHint);
+                }
                 if (resolved != null) {
                     existing.setRequestId(resolved);
                     applicationMapper.updateById(existing);
@@ -116,7 +125,11 @@ public class CandidateApplicationService {
         application.setPlatform(platform);
         application.setPlatformJobId(jobId);
         application.setPlatformJobHint(cut(platformJobHint, 128));
-        application.setRequestId(resolveRequestId(platform, jobId));
+        Long requestId = resolveRequestId(platform, jobId);
+        if (requestId == null) {
+            requestId = resolveRequestIdByName(platformJobHint);
+        }
+        application.setRequestId(requestId);
         application.setSourceChannel(cut(sourceChannel, 32));
         application.setFirstResumeVersionId(resumeVersionId);
         application.setAppliedAt(appliedAt != null ? appliedAt : LocalDateTime.now(ZoneOffset.UTC));
@@ -160,6 +173,78 @@ public class CandidateApplicationService {
                         .orderByAsc(PublishRecord::getId)
                         .last("LIMIT 1"));
         return hits.isEmpty() ? null : hits.get(0).getRequestId();
+    }
+
+    /**
+     * 同名岗位兜底解析（用户决策 2026-09-23：获取到的平台岗位与系统同名职位一一对应）。
+     *
+     * <p>背景：岗位经中台发布但发布成功信号未被哨兵捕获（或人工在 BOSS 直接发布）时，
+     * {@code publish_record.platform_job_id} 没有落值，精确 ID 解析永远为 NULL ——
+     * 投递长期「未归类」。此时退而求其次：从 {@code platform_job_hint}
+     * （「9月23日 沟通的职位-Java初级工程师」）提取岗位名，与 {@code hr_request.title}
+     * <b>精确</b>匹配。</p>
+     *
+     * <p><b>歧义规则（排除法 + 唯一才认）</b>：</p>
+     * <ol>
+     *   <li>仅匹配 {@code open} 状态的需求单；</li>
+     *   <li>排除已有 {@code platform_job_id} 发布映射的同名需求单 ——
+     *       它们对应的平台岗位是另一个 jobId（否则精确解析已命中），本次解析不到的
+     *       jobId 不是它们；</li>
+     *   <li>过滤后<b>必须恰好一条</b>才认；零条或多条都返回 null（不猜）。</li>
+     * </ol>
+     *
+     * <p>兜底值可被真实映射纠正：后续发布台账补绑 {@code platform_job_id} 时，
+     * {@link #recomputeByPlatformJob} 会按权威映射级联覆盖。</p>
+     */
+    public Long resolveRequestIdByName(String platformJobHint) {
+        String jobName = jobNameFromHint(platformJobHint);
+        if (!StringUtils.hasText(jobName)) {
+            return null;
+        }
+        List<HrRequest> sameTitle = hrRequestMapper.selectList(
+                new LambdaQueryWrapper<HrRequest>()
+                        .eq(HrRequest::getTitle, jobName)
+                        .eq(HrRequest::getStatus, "open")
+                        .orderByDesc(HrRequest::getId));
+        if (sameTitle.isEmpty()) {
+            return null;
+        }
+        List<Long> requestIds = sameTitle.stream().map(HrRequest::getId).toList();
+        Set<Long> boundRequestIds = publishRecordMapper.selectList(
+                        new LambdaQueryWrapper<PublishRecord>()
+                                .in(PublishRecord::getRequestId, requestIds)
+                                .isNotNull(PublishRecord::getPlatformJobId))
+                .stream().map(PublishRecord::getRequestId).collect(Collectors.toSet());
+        List<HrRequest> unbound = sameTitle.stream()
+                .filter(r -> !boundRequestIds.contains(r.getId())).toList();
+        if (unbound.size() != 1) {
+            log.info("同名岗位兜底放弃：岗位名={}，同名 open={} 条，排除已绑定后剩 {} 条（非唯一，不猜）",
+                    jobName, sameTitle.size(), unbound.size());
+            return null;
+        }
+        log.info("同名岗位兜底命中：岗位名={} → request={}（platform_job_id 映射未建立，按名称一一对应）",
+                jobName, unbound.get(0).getId());
+        return unbound.get(0).getId();
+    }
+
+    /**
+     * 从沟通列表 hint 原文提取岗位名；格式漂移时返回 null（宁可不兜底）。
+     *
+     * <p>提取规则（BOSS 沟通列表原文）：取「沟通的职位-」分隔符之后的部分，
+     * 「9月23日 沟通的职位-Java初级工程师」→「Java初级工程师」。不锚定日期前缀，
+     * 因为真机取证 hint 可能带平台岗位 ID 前缀
+     * （「600fe3fb… · 9月23日 沟通的职位-Java初级工程师」）。</p>
+     */
+    private String jobNameFromHint(String hint) {
+        if (!StringUtils.hasText(hint)) {
+            return null;
+        }
+        String name = hint.trim();
+        int idx = name.indexOf("沟通的职位-");
+        if (idx < 0) {
+            return null;
+        }
+        return name.substring(idx + "沟通的职位-".length()).trim();
     }
 
     // ==================================================================

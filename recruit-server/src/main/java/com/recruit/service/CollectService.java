@@ -125,6 +125,8 @@ public class CollectService {
         String platform = dto.getPlatform();
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         LocalDateTime collectedAt = p.getCollectedAt() != null ? p.getCollectedAt() : now;
+        // 空字段（纯附件补采）判定：候选人守卫、版本去重、打分抑制都依赖它
+        boolean fieldsEmpty = p.getFields() == null || p.getFields().isEmpty();
 
         // ---------- 1) 候选人归一（双 ID 空间 → 同一行）----------
         // ★ 为什么不能只按 platform_user_id 单键查 ★
@@ -162,6 +164,15 @@ public class CollectService {
                     hits.size(), platform, idCandidates, candidate.getId());
         }
         boolean candidateCreated = candidate == null;
+        // 纯附件采集守卫（2026-09-23 程春灿案例）：一个连简历字段都没有的请求若新建候选人，
+        // 只会产出「姓名未知 + 空版本 + 空打分」的三无记录（附件下载 URL 里的加密 geekId
+        // 与已有候选人的数字 uid 无交集，归一查不中才会走到这里）。
+        // 正确路径：先在该候选人的聊天窗口/简历详情页完成一次带字段的采集，
+        // 之后附件补采会命中已有候选人，附件挂到正确的人名下。
+        if (candidateCreated && fieldsEmpty) {
+            throw new MyException(400,
+                    "纯附件采集无法确认候选人身份：请先在该候选人的聊天窗口或简历详情页点采集，再补采附件");
+        }
 
         if (candidateCreated) {
             candidate = new Candidate();
@@ -209,19 +220,36 @@ public class CollectService {
         // ---------- 2) 简历版本去重 ----------
         String fieldsJson = canonicalJson(p.getFields());
         String contentHash = sha256Hex(fieldsJson.getBytes(StandardCharsets.UTF_8));
-        // 用 selectList + LIMIT 1，而不是 selectOne。
-        // 表上其实**有**唯一键 uk_candidate_hash (candidate_id, content_hash)，
-        // 所以「同 candidate 同 hash 两行」在正常情况下不可能出现，selectOne 也能跑。
-        // 这里仍取列表形式，是为了**不把采集堵死**：一旦唯一键因某种原因缺失/被放宽
-        // （或将来换成非唯一索引），selectOne 会因为 TooManyResults 让整个采集直接失败，
-        // 而 LIMIT 1 只是安静地取第一条、行为仍然确定。属于零成本的防御，不是必需的绕行。
-        List<ResumeVersion> sameContent = resumeVersionMapper.selectList(
-                new LambdaQueryWrapper<ResumeVersion>()
-                        .eq(ResumeVersion::getCandidateId, candidate.getId())
-                        .eq(ResumeVersion::getContentHash, contentHash)
-                        .orderByAsc(ResumeVersion::getId)
-                        .last("LIMIT 1"));
-        ResumeVersion version = sameContent.isEmpty() ? null : sameContent.get(0);
+        ResumeVersion version = null;
+        if (fieldsEmpty) {
+            // 空字段补采（纯附件路径）：不按内容哈希去重，也不新建「空简历版本」——
+            // fields 为 {} 的版本没有任何可打分的内容，只会产生无意义的打分记录。
+            // 附件挂到该候选人最近一次**有内容**的版本上。
+            // 极端情形（候选人一个版本都没有，早期数据才可能）：落到下方新建分支，
+            // 空版本作为起始版本照建，保证 version.getId() 不为 null。
+            List<ResumeVersion> latest = resumeVersionMapper.selectList(
+                    new LambdaQueryWrapper<ResumeVersion>()
+                            .eq(ResumeVersion::getCandidateId, candidate.getId())
+                            .orderByDesc(ResumeVersion::getId)
+                            .last("LIMIT 1"));
+            if (!latest.isEmpty()) {
+                version = latest.get(0);
+            }
+        } else {
+            // 用 selectList + LIMIT 1，而不是 selectOne。
+            // 表上其实**有**唯一键 uk_candidate_hash (candidate_id, content_hash)，
+            // 所以「同 candidate 同 hash 两行」在正常情况下不可能出现，selectOne 也能跑。
+            // 这里仍取列表形式，是为了**不把采集堵死**：一旦唯一键因某种原因缺失/被放宽
+            // （或将来换成非唯一索引），selectOne 会因为 TooManyResults 让整个采集直接失败，
+            // 而 LIMIT 1 只是安静地取第一条、行为仍然确定。属于零成本的防御，不是必需的绕行。
+            List<ResumeVersion> sameContent = resumeVersionMapper.selectList(
+                    new LambdaQueryWrapper<ResumeVersion>()
+                            .eq(ResumeVersion::getCandidateId, candidate.getId())
+                            .eq(ResumeVersion::getContentHash, contentHash)
+                            .orderByAsc(ResumeVersion::getId)
+                            .last("LIMIT 1"));
+            version = sameContent.isEmpty() ? null : sameContent.get(0);
+        }
         boolean versionCreated = version == null;
         if (versionCreated) {
             version = new ResumeVersion();
@@ -286,9 +314,10 @@ public class CollectService {
 
         // ---------- 2.6) LLM 打分触发 ----------
         // 只在**新建版本**时发事件（版本去重跳过不发）—— 同一份内容天然不会重复打分。
+        // 空字段补采即使走了「新建空版本」的防御分支，也不打分：{} 没有可打分的内容。
         // 事件在事务提交后（AFTER_COMMIT）才被消费，监听器看到的投递事实/需求单映射均已落库；
         // 打分失败不回滚采集（增强能力，非必经环节），见 ResumeScoreService。
-        if (versionCreated) {
+        if (versionCreated && !fieldsEmpty) {
             eventPublisher.publishEvent(new ResumeVersionCreatedEvent(candidate.getId(), version.getId()));
         }
 
@@ -331,7 +360,7 @@ public class CollectService {
                 "HR 已确认本次采集仅用于本单位招聘");
         String auditId = writeAudit("collect", "ok", extUserId, extTokenId, platform, p.getPlatformUserId(),
                 candidate.getId(), p.getScene(), dto.getConsent().getPageUrl(), p.getSourceApi(),
-                buildCollectNote(candidateCreated, versionCreated, needUpload.size()));
+                buildCollectNote(candidateCreated, versionCreated, needUpload.size(), fieldsEmpty));
 
         log.info("采集入库：platform={}, geek={}, candidate={}({}), version={}({}), 待上传附件={}, operator={}",
                 platform, p.getPlatformUserId(), candidate.getId(), candidateCreated ? "新建" : "复用",
@@ -344,7 +373,7 @@ public class CollectService {
                 .resumeVersionCreated(versionCreated)
                 .attachmentIds(needUpload.stream().map(String::valueOf).toList())
                 .auditId(auditId)
-                .message(buildCollectNote(candidateCreated, versionCreated, needUpload.size()))
+                .message(buildCollectNote(candidateCreated, versionCreated, needUpload.size(), fieldsEmpty))
                 .build();
     }
 
@@ -636,10 +665,16 @@ public class CollectService {
         return JSON.toJSONString(fields, JSONWriter.Feature.MapSortField);
     }
 
-    private String buildCollectNote(boolean candidateCreated, boolean versionCreated, int needUpload) {
+    private String buildCollectNote(boolean candidateCreated, boolean versionCreated, int needUpload,
+                                    boolean fieldsEmpty) {
         StringBuilder sb = new StringBuilder();
         sb.append(candidateCreated ? "新建候选人" : "复用已有候选人");
-        sb.append("；").append(versionCreated ? "新建简历版本" : "内容相同，版本去重跳过");
+        sb.append("；");
+        if (fieldsEmpty && !versionCreated) {
+            sb.append("空字段补采，附件挂到最新版本（不建空版本、不触发打分）");
+        } else {
+            sb.append(versionCreated ? "新建简历版本" : "内容相同，版本去重跳过");
+        }
         if (needUpload > 0) {
             sb.append("；待下载附件 ").append(needUpload).append(" 个");
         }

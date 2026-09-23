@@ -3,9 +3,11 @@ package com.recruit.service;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.recruit.entity.CandidateApplication;
 import com.recruit.entity.Channel;
+import com.recruit.entity.HrRequest;
 import com.recruit.entity.PublishRecord;
 import com.recruit.mapper.CandidateApplicationMapper;
 import com.recruit.mapper.ChannelMapper;
+import com.recruit.mapper.HrRequestMapper;
 import com.recruit.mapper.PublishRecordMapper;
 import com.recruit.support.MybatisPlusTestSupport;
 import org.junit.jupiter.api.BeforeAll;
@@ -39,7 +41,9 @@ import static org.mockito.Mockito.when;
  *       <td>库里出现「投了但不知投哪」的半行，「未归类」无法再用本表无行判定</td></tr>
  *   <tr><td>2</td><td>同一人 × 同一岗位不重复落行，且不改写首次投递时间</td>
  *       <td>投递事实被重复计数，「第一次投递时间」随采集次数漂移</td></tr>
- *   <tr><td>3</td><td>映射未知时 request_id 留 NULL，<b>绝不猜</b></td>
+ *   <tr><td>3</td><td>映射未知时不瞎猜近似岗</td>
+ *       <td>精确 ID 解析不到时，先走「同名岗位兜底」（见 {@code resolveRequestIdByName}，
+ *           排除法 + 唯一才认）；仍解析不到才写 NULL —— 模糊/多义匹配永远不做</td>
  *       <td>候选人被归到错误职位；未归类看得见，错归类看不见</td></tr>
  *   <tr><td>4</td><td>映射建立后级联重算，派生值与映射永远一致</td>
  *       <td>同一平台岗位下的投递归属分裂成两个需求单</td></tr>
@@ -57,10 +61,11 @@ class CandidateApplicationConsistencyTest {
     private static final Long REQUEST_ID = 9001L;
     private static final LocalDateTime COLLECTED_AT = LocalDateTime.of(2026, 9, 21, 5, 58, 14);
 
-    /** 服务内部会构造 LambdaQueryWrapper / LambdaUpdateWrapper，需先引导三个实体的元数据缓存 */
+    /** 服务内部会构造 LambdaQueryWrapper / LambdaUpdateWrapper，需先引导四个实体的元数据缓存 */
     @BeforeAll
     static void bootstrapMybatisPlus() {
-        MybatisPlusTestSupport.initTableInfo(CandidateApplication.class, Channel.class, PublishRecord.class);
+        MybatisPlusTestSupport.initTableInfo(CandidateApplication.class, Channel.class,
+                PublishRecord.class, HrRequest.class);
     }
 
     // ==================== 1. 拿不到岗位 ID 就不落行 ====================
@@ -111,8 +116,11 @@ class CandidateApplicationConsistencyTest {
         when(channelMapper.selectList(any())).thenReturn(List.of(channel()));
         // 平台岗位没有任何台账映射
         when(recordMapper.selectList(any())).thenReturn(List.of());
+        // 同名兜底也查不到任何 open 需求单（默认即空 List，显式写出便于理解）
+        HrRequestMapper hrRequestMapper = mock(HrRequestMapper.class);
+        when(hrRequestMapper.selectList(any())).thenReturn(List.of());
         CandidateApplicationService service =
-                new CandidateApplicationService(mapper, channelMapper, recordMapper);
+                new CandidateApplicationService(mapper, channelMapper, recordMapper, hrRequestMapper);
 
         service.recordFromCollect(CANDIDATE_ID, PLATFORM, JOB_ID, "9月21日 沟通的职位-Java",
                 "chat", 11L, COLLECTED_AT);
@@ -137,7 +145,7 @@ class CandidateApplicationConsistencyTest {
         when(channelMapper.selectList(any())).thenReturn(List.of(channel()));
         when(recordMapper.selectList(any())).thenReturn(List.of(recordWithJob(JOB_ID, REQUEST_ID)));
         CandidateApplicationService service =
-                new CandidateApplicationService(mapper, channelMapper, recordMapper);
+                new CandidateApplicationService(mapper, channelMapper, recordMapper, mock(HrRequestMapper.class));
 
         service.recordFromCollect(CANDIDATE_ID, PLATFORM, JOB_ID, null, "chat", 11L, COLLECTED_AT);
 
@@ -152,8 +160,8 @@ class CandidateApplicationConsistencyTest {
         CandidateApplicationMapper mapper = mock(CandidateApplicationMapper.class);
         ChannelMapper channelMapper = mock(ChannelMapper.class);
         when(channelMapper.selectList(any())).thenReturn(List.of());
-        CandidateApplicationService service =
-                new CandidateApplicationService(mapper, channelMapper, mock(PublishRecordMapper.class));
+        CandidateApplicationService service = new CandidateApplicationService(
+                mapper, channelMapper, mock(PublishRecordMapper.class), mock(HrRequestMapper.class));
 
         assertThat(service.resolveRequestId("liepin", JOB_ID)).isNull();
         assertThat(service.resolveRequestId(null, JOB_ID)).isNull();
@@ -173,7 +181,7 @@ class CandidateApplicationConsistencyTest {
         when(channelMapper.selectList(any())).thenReturn(List.of(channel()));
         when(recordMapper.selectList(any())).thenReturn(List.of(recordWithJob(JOB_ID, REQUEST_ID)));
         CandidateApplicationService service =
-                new CandidateApplicationService(mapper, channelMapper, recordMapper);
+                new CandidateApplicationService(mapper, channelMapper, recordMapper, mock(HrRequestMapper.class));
 
         service.recordFromCollect(CANDIDATE_ID, PLATFORM, JOB_ID, null, "chat", 11L, COLLECTED_AT);
 
@@ -194,7 +202,7 @@ class CandidateApplicationConsistencyTest {
         when(recordMapper.selectList(any())).thenReturn(List.of(recordWithJob(JOB_ID, newRequestId)));
         when(mapper.update(any(), any())).thenReturn(3);
         CandidateApplicationService service =
-                new CandidateApplicationService(mapper, channelMapper, recordMapper);
+                new CandidateApplicationService(mapper, channelMapper, recordMapper, mock(HrRequestMapper.class));
 
         int affected = service.recomputeByPlatformJob(CHANNEL_ID, JOB_ID);
 
@@ -230,8 +238,8 @@ class CandidateApplicationConsistencyTest {
         CandidateApplicationMapper mapper = mock(CandidateApplicationMapper.class);
         ChannelMapper channelMapper = mock(ChannelMapper.class);
         when(channelMapper.selectById(CHANNEL_ID)).thenReturn(null);
-        CandidateApplicationService service =
-                new CandidateApplicationService(mapper, channelMapper, mock(PublishRecordMapper.class));
+        CandidateApplicationService service = new CandidateApplicationService(
+                mapper, channelMapper, mock(PublishRecordMapper.class), mock(HrRequestMapper.class));
 
         assertThat(service.recomputeByPlatformJob(CHANNEL_ID, JOB_ID)).isZero();
         verify(mapper, never()).update(any(), any());
@@ -248,10 +256,121 @@ class CandidateApplicationConsistencyTest {
         assertThat(service.total()).isEqualTo(4L);
     }
 
+    // ==================== 5. 同名岗位兜底（排除法 + 唯一才认） ====================
+    //
+    // 背景（2026-09-23 用户决策）：岗位经中台发布但发布成功信号未被哨兵捕获（或人工在
+    // BOSS 直接发布）时，publish_record.platform_job_id 没有落值，精确 ID 解析永远为 NULL。
+    // 兜底规则：从 hint（「9月23日 沟通的职位-Java初级工程师」）提取岗位名，
+    // 与 hr_request.title 精确匹配；仅 open 状态、排除已有平台岗位绑定的同名需求单、
+    // 过滤后必须恰好一条才认 —— 零条或多条都不猜（错归类看不见，未归类看得见）。
+
+    @Test
+    @DisplayName("兜底·hint 缺失或格式不符：返回 NULL 且不查库（宁可不兜底）")
+    void nameFallbackGivesUpOnBadHint() {
+        HrRequestMapper hrRequestMapper = mock(HrRequestMapper.class);
+        CandidateApplicationService service = newServiceWithNameFallback(hrRequestMapper);
+
+        assertThat(service.resolveRequestIdByName(null)).isNull();
+        assertThat(service.resolveRequestIdByName("   ")).isNull();
+        assertThat(service.resolveRequestIdByName("9月23日 交换的简历-Java")).as("无「沟通的职位-」分隔符").isNull();
+        assertThat(service.resolveRequestIdByName("9月23日 沟通的职位-")).as("分隔符后为空").isNull();
+
+        verify(hrRequestMapper, never()).selectList(any());
+    }
+
+    @Test
+    @DisplayName("兜底·命中：同名 open 且未绑定平台岗位的需求单恰好一条 → 认")
+    void nameFallbackResolvesUniqueUnboundOpenRequest() {
+        HrRequestMapper hrRequestMapper = mock(HrRequestMapper.class);
+        when(hrRequestMapper.selectList(any())).thenReturn(List.of(hrRequest(9001L, "Java初级工程师", "open")));
+        PublishRecordMapper recordMapper = mock(PublishRecordMapper.class);
+        when(recordMapper.selectList(any())).thenReturn(List.of());
+        CandidateApplicationService service = newServiceWithNameFallback(hrRequestMapper, recordMapper);
+
+        assertThat(service.resolveRequestIdByName("600fe3fb… · 9月23日 沟通的职位-Java初级工程师"))
+                .as("hint 可带平台岗位 ID 前缀，岗位名取「沟通的职位-」之后")
+                .isEqualTo(9001L);
+    }
+
+    @Test
+    @DisplayName("兜底·已绑定排除：两条同名 open，其中一条已绑定别的平台岗位 → 认未绑定的那条")
+    void nameFallbackSkipsRequestsAlreadyBoundToOtherJobs() {
+        HrRequestMapper hrRequestMapper = mock(HrRequestMapper.class);
+        // 9001 已绑定平台岗位 77e56237（它的 jobId 不是本次解析的这个，否则精确解析早命中了）
+        when(hrRequestMapper.selectList(any())).thenReturn(List.of(
+                hrRequest(9001L, "Java初级工程师", "open"),
+                hrRequest(9002L, "Java初级工程师", "open")));
+        PublishRecordMapper recordMapper = mock(PublishRecordMapper.class);
+        when(recordMapper.selectList(any())).thenReturn(List.of(recordWithJob("77e56237", 9001L)));
+        CandidateApplicationService service = newServiceWithNameFallback(hrRequestMapper, recordMapper);
+
+        assertThat(service.resolveRequestIdByName("9月23日 沟通的职位-Java初级工程师"))
+                .isEqualTo(9002L);
+    }
+
+    @Test
+    @DisplayName("兜底·多义放弃：两条同名 open 都未绑定 → NULL（不猜）")
+    void nameFallbackGivesUpWhenAmbiguous() {
+        HrRequestMapper hrRequestMapper = mock(HrRequestMapper.class);
+        when(hrRequestMapper.selectList(any())).thenReturn(List.of(
+                hrRequest(9001L, "Java初级工程师", "open"),
+                hrRequest(9002L, "Java初级工程师", "open")));
+        PublishRecordMapper recordMapper = mock(PublishRecordMapper.class);
+        when(recordMapper.selectList(any())).thenReturn(List.of());
+        CandidateApplicationService service = newServiceWithNameFallback(hrRequestMapper, recordMapper);
+
+        assertThat(service.resolveRequestIdByName("9月23日 沟通的职位-Java初级工程师")).isNull();
+    }
+
+    @Test
+    @DisplayName("兜底·端到端：精确 ID 解析不到 + 兜底命中 → 新行 request_id 直接归类")
+    void recordFromCollectFallsBackToNameResolution() {
+        CandidateApplicationMapper mapper = mock(CandidateApplicationMapper.class);
+        ChannelMapper channelMapper = mock(ChannelMapper.class);
+        PublishRecordMapper recordMapper = mock(PublishRecordMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(channelMapper.selectList(any())).thenReturn(List.of(channel()));
+        // 两次 selectList 均为空：精确解析（eq platformJobId）与兜底排除查询（in + isNotNull）
+        when(recordMapper.selectList(any())).thenReturn(List.of());
+        HrRequestMapper hrRequestMapper = mock(HrRequestMapper.class);
+        when(hrRequestMapper.selectList(any())).thenReturn(List.of(hrRequest(9001L, "Java初级工程师", "open")));
+        CandidateApplicationService service =
+                new CandidateApplicationService(mapper, channelMapper, recordMapper, hrRequestMapper);
+
+        service.recordFromCollect(CANDIDATE_ID, PLATFORM, "600fe3fb811dcbb50nN93ty6F1ZR",
+                "9月23日 沟通的职位-Java初级工程师", "chat", 11L, COLLECTED_AT);
+
+        ArgumentCaptor<CandidateApplication> captor = ArgumentCaptor.forClass(CandidateApplication.class);
+        verify(mapper).insert(captor.capture());
+        assertThat(captor.getValue().getRequestId())
+                .as("精确解析不到时按同名兜底归类").isEqualTo(9001L);
+    }
+
     // ==================== 构造辅助 ====================
 
     private CandidateApplicationService newService(CandidateApplicationMapper mapper) {
-        return new CandidateApplicationService(mapper, mock(ChannelMapper.class), mock(PublishRecordMapper.class));
+        return new CandidateApplicationService(mapper, mock(ChannelMapper.class),
+                mock(PublishRecordMapper.class), mock(HrRequestMapper.class));
+    }
+
+    /** 兜底用例专用：只需 hrRequestMapper（+ 可选 recordMapper），其余 mock 默认行为 */
+    private CandidateApplicationService newServiceWithNameFallback(HrRequestMapper hrRequestMapper) {
+        return new CandidateApplicationService(mock(CandidateApplicationMapper.class), mock(ChannelMapper.class),
+                mock(PublishRecordMapper.class), hrRequestMapper);
+    }
+
+    private CandidateApplicationService newServiceWithNameFallback(HrRequestMapper hrRequestMapper,
+                                                                   PublishRecordMapper recordMapper) {
+        return new CandidateApplicationService(mock(CandidateApplicationMapper.class), mock(ChannelMapper.class),
+                recordMapper, hrRequestMapper);
+    }
+
+    private HrRequest hrRequest(Long id, String title, String status) {
+        HrRequest r = new HrRequest();
+        r.setId(id);
+        r.setTitle(title);
+        r.setStatus(status);
+        return r;
     }
 
     private Channel channel() {

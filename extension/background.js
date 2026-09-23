@@ -1917,6 +1917,35 @@ async function getSelfUid() {
   }
 }
 
+/**
+ * 最近一次成功采集的候选人身份槽（纯附件补采专用）。
+ *
+ * 为什么需要它：PDF 预览页（bzl-office/pdf-viewer）上只有附件、没有任何简历字段，
+ * 唯一能拿到的身份是下载 URL 里的**加密** geekId —— 而聊天页采集存的是**数字** uid，
+ * 两个 ID 空间无交集，直接拿 geekId 去提交只会新建一条「姓名未知 + 空版本 + 空打分」
+ * 的三无记录（2026-09-23 程春灿案例；服务端现在也会 400 拒绝这种请求）。
+ * 正确做法：附件补采时挂到最近一次采集的候选人身上 —— 「先在聊天页采人、
+ * 再点开预览补附件」本来就是正确的操作顺序，这个槽只是把顺序固化成机制。
+ *
+ * 窗口取 5 分钟：覆盖「聊天页采集 → 打开 PDF 预览 → 点采集」的正常间隔，
+ * 又不足以让上一位候选人的附件漂移到下一位头上（ID 比对防的是更早的情况）。
+ */
+const COLLECT_LAST_IDENTITY_KEY = 'collect_last_identity';
+const COLLECT_LAST_IDENTITY_TTL_MS = 5 * 60 * 1000;
+
+/** 读最近采集身份；槽缺失 / 过期 / 无主键时返回 null */
+async function getLastCollectIdentity() {
+  try {
+    const st = await chrome.storage.local.get([COLLECT_LAST_IDENTITY_KEY]);
+    const it = st && st[COLLECT_LAST_IDENTITY_KEY];
+    if (!it || !it.platformUserId) return null;
+    if (Date.now() - (it.ts || 0) > COLLECT_LAST_IDENTITY_TTL_MS) return null;
+    return it;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** 在响应体里找 userBaseInfo.id 并记住（会话进入接口会带回自己的账号信息） */
 async function learnSelfUid(root) {
   if (!root || typeof root !== 'object') return;
@@ -2172,6 +2201,8 @@ async function handleCollectRequest(payload, tabId) {
   const sel = selectSources(captures, selfUid);
   const fieldsCapture = sel.fields;
   let platformUserId = sel.platformUserId;
+  // 纯附件补采（无简历字段）时从最近采集槽里带出的信息，用于补挂身份/岗位线索
+  let supplementInfo = null;
 
   if (!fieldsCapture) {
     if (sel.multiCount > 0) {
@@ -2187,8 +2218,37 @@ async function handleCollectRequest(payload, tabId) {
         error: '当前响应没有可用的简历字段。\n请先在 BOSS 里打开该候选人的简历详情或聊天窗口，等数据加载完再点采集。',
       };
     }
-    // 极端情况：只有附件、没有 JSON 命中 —— 那就以附件 URL 里的 ID 为准
-    platformUserId = identityFromUrl(attachments[0].originUrl);
+    // 纯附件采集（PDF 预览页）：不再拿附件 URL 里的加密 geekId 直接当身份 ——
+    // 它与聊天页存的数字 uid 无交集，只会新建「姓名未知」的三无记录（服务端同样会 400 拒绝）。
+    // 改挂到本浏览器最近一次成功采集的候选人（5 分钟窗口，见 getLastCollectIdentity）。
+    const last = await getLastCollectIdentity();
+    if (!last) {
+      return {
+        ok: false,
+        error: '纯附件采集需要先知道这是谁的简历。\n'
+          + '请先在该候选人的聊天窗口或简历详情页点一次采集，再回来补采附件。',
+      };
+    }
+    // 防张冠李戴：附件 URL 里能取到 geekId 时，必须与最近候选人的任一已知 ID 形态相符；
+    // 取不到时信任 5 分钟窗口（补挂结果会带 warning，HR 可核对）。
+    const urlGeekId = identityFromUrl(attachments[0].originUrl);
+    if (urlGeekId && urlGeekId !== last.platformUserId && urlGeekId !== last.secondary) {
+      return {
+        ok: false,
+        error: '该附件不属于最近采集的候选人（ID 不匹配），已放弃补挂（避免张冠李戴）。\n'
+          + '请在附件所属候选人的聊天窗口或简历详情页先采集。',
+      };
+    }
+    platformUserId = last.platformUserId;
+    supplementInfo = {
+      name: last.name || null,
+      secondary: last.secondary || null,
+      platformJobId: last.platformJobId || null,
+      platformJobHint: last.platformJobHint || null,
+    };
+    console.log('[Background] 纯附件采集：补挂到最近采集的候选人', platformUserId, {
+      urlGeekId, name: supplementInfo.name,
+    });
   }
 
   if (!platformUserId) {
@@ -2356,9 +2416,12 @@ async function handleCollectRequest(payload, tabId) {
     // 归一用：同一个人在平台上的**另一种 ID 形态**。服务端拿它做写入时归一 ——
     // 只按主键单键查会让「先采到数字 uid、后采到加密 geekId」分裂成两条候选人记录
     // （2026-09-21 实测：陈诗健、谢建广各中一次）。取值约束见 counterpartIdOf 注释。
+    // 纯附件补采时页面侧没有任何响应体可查（sel.secondary 恒为 null），
+    // 最近采集槽里存的另一种形态是唯一来源 —— 不带上它，补采仍可能因键无交集而分裂。
     secondaryPlatformUserId: counterpartIdOf(
       platformUserId,
-      [sel.secondary, expectedGeekId].concat(Array.from(bridgedIds)),
+      [sel.secondary, supplementInfo && supplementInfo.secondary, expectedGeekId]
+        .concat(Array.from(bridgedIds)),
     ),
     sourceChannel: payload.sourceChannel || 'chat',
     scene,
@@ -2369,8 +2432,10 @@ async function handleCollectRequest(payload, tabId) {
     // 岗位 ID：**已归一成加密形态**（与发布台账 platform_job_id 同形态，映射才解析得到）。
     // 拿不到桥时退化为原始数字形态 —— 照样落行，只是这条投递暂时「未归类」，
     // 宁可显示未归类，也不让投递事实凭空消失。
-    platformJobId: jobNorm.jobId || null,
-    platformJobHint: jobHint || null,
+    // 纯附件补采时 fields 为空、本页取不到岗位线索 —— 用最近采集槽里的岗位
+    // （同一个人 5 分钟内投的岗位不会变，服务端按 人×岗位 幂等，不会重复落行）。
+    platformJobId: jobNorm.jobId || (supplementInfo && supplementInfo.platformJobId) || null,
+    platformJobHint: jobHint || (supplementInfo && supplementInfo.platformJobHint) || null,
     fields,
     raw: fieldsCapture ? fieldsCapture.capture.bodyText : null,
     rawEncrypted: 0, // Phase 0 ADJUST-1：详情页密文原样存 raw，这里不做解密判断
@@ -2423,8 +2488,28 @@ async function handleCollectRequest(payload, tabId) {
   }
 
   const total = candidatePayload.attachments.length;
+  // 纯附件补采时 fields 为空，姓名取最近采集槽里带来的（写回槽时不丢名字）
   const nameHint = fields.name || fields.geekName
-    || (fields.user && fields.user.name) || null;
+    || (fields.user && fields.user.name)
+    || (supplementInfo && supplementInfo.name) || null;
+
+  // 最近采集身份槽刷新：纯附件补采（PDF 预览页）没有简历字段，
+  // 身份只能从这里来 —— 每次成功采集后写入，供 5 分钟内的补采补挂。
+  // 存储失败不阻塞结果返回（补采时读不到会走「先采集再补附件」引导）。
+  try {
+    await chrome.storage.local.set({
+      [COLLECT_LAST_IDENTITY_KEY]: {
+        platformUserId,
+        secondary: candidatePayload.secondaryPlatformUserId,
+        name: nameHint,
+        platformJobId: candidatePayload.platformJobId,
+        platformJobHint: candidatePayload.platformJobHint,
+        ts: Date.now(),
+      },
+    });
+  } catch (e) {
+    console.warn('[Background] 最近采集身份槽写入失败（不影响本次采集）:', e && e.message);
+  }
 
   const warnings = [];
   if (total && stored < total) {
@@ -2459,6 +2544,12 @@ async function handleCollectRequest(payload, tabId) {
     }
   } else if (cacheRejected > 0) {
     warnings.push('另有 ' + cacheRejected + ' 个附件请求与当前候选人 ID 不匹配，已丢弃（避免张冠李戴）');
+  }
+  if (supplementInfo) {
+    // 补挂必须显式告知：身份来自 5 分钟内的最近采集，不是本页直接确认的，HR 有权核对。
+    warnings.push('本次页面无简历字段，附件已补挂到最近采集的候选人'
+      + (supplementInfo.name ? ('「' + supplementInfo.name + '」') : '')
+      + '名下（5 分钟窗口内），请在中台核对是否确属该候选人');
   }
   if (!/[A-Za-z]/.test(platformUserId)) {
     // 幂等键退化成数字 ID —— 与加密 ID 形态不同，可能和别的采集链路产生重复候选人（报告 V7）

@@ -206,9 +206,9 @@ function htmlResponse() {
   };
 }
 
-function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCaptures, attachResponse, jobPairs }) {
+function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCaptures, attachResponse, jobPairs, noFields, localExtra }) {
   const bodyText = body || RESUME_BODY;
-  const local = { ext_token: 'EXTTOK', collect_self_uid: HR_UID };
+  const local = Object.assign({ ext_token: 'EXTTOK', collect_self_uid: HR_UID }, localExtra || {});
   const session = { collect_recent_attachments: cacheHits || [] };
   const calls = { submits: [], uploads: [], downloads: [], tabMsgs: [] };
   const handlers = {};
@@ -227,7 +227,8 @@ function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCapture
 
   // 主命中 + 附加命中：真机聊天页同一帧里就有多条命中（historyMsg 字段全但无加密 ID、
   // 好友/会话列表带 encryptGeekId 但属「多人响应」不能当来源），必须能一起喂进 harness。
-  const captures = [{
+  // noFields=true 模拟 PDF 预览页：页面只有附件请求、没有任何简历接口响应（captures 为空）。
+  const captures = (noFields ? [] : [{
     _id: 1,
     url: sourceUrl,
     method: 'GET',
@@ -238,7 +239,7 @@ function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCapture
     matchedKeys: ['education', 'expectSalary', 'workYear', 'workExpList'],
     matchedKeyCount: 4,
     bodyText,
-  }].concat((extraCaptures || []).map((c, i) => ({
+  }]).concat((extraCaptures || []).map((c, i) => ({
     _id: i + 2,
     url: c.url || 'https://www.zhipin.com/wapi/zpjob/chat/friend/list',
     method: 'GET',
@@ -351,7 +352,7 @@ function makeHarness({ sourceUrl, cacheHits, hookAttachments, body, extraCapture
   });
 
   vm.runInContext(BG_SRC, ctx, { filename: 'background.js' });
-  return { ctx, calls, handlers, session };
+  return { ctx, calls, handlers, session, local };
 }
 
 async function collect(h, payload) {
@@ -1052,12 +1053,147 @@ async function runPartC() {
   }
 }
 
+// ============================================================ D. 纯附件补挂（最近采集身份槽）
+// 2026-09-23 程春灿案例：PDF 预览页只有附件、无简历字段，旧逻辑拿附件 URL 里的
+// 加密 geekId 直接当身份 → 新建「姓名未知 + 空版本 + 空打分」三无记录（服务端已同步加守卫）。
+// 修复后的契约：身份从「5 分钟内最近一次成功采集」的槽里取；
+// URL geekId 能取到时必须与槽的任一 ID 形态相符（防张冠李戴）；取不到时信任窗口 + 显式警告。
+async function runPartD() {
+  const SLOT = {
+    platformUserId: REAL_UID_GEEK,   // 聊天页采集的主键（数字 uid，真机现状）
+    secondary: REAL_ENC_GEEK,        // 好友列表映射出的加密 geekId（附件 URL 同形态）
+    name: '陈诗健',
+    platformJobId: REAL_JOB_ENC,
+    platformJobHint: '9月23日 沟通的职位-Java初级工程师',
+    ts: Date.now(),
+  };
+  const hookAttach = (url) => ({
+    originUrl: url, contentType: 'application/pdf', bytes: 131072,
+    sourceScene: 'attach', platformFileId: 'download4boss:' + url.split('/').pop().split('?')[0],
+  });
+
+  // D/T1 没有槽（本浏览器 5 分钟内没采过人）→ 拒绝并引导先采人
+  {
+    const h = makeHarness({ noFields: true, hookAttachments: [hookAttach(REAL_ATTACH_URL)] });
+    const r = await collect(h, { scene: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    check('D/T1 无槽时拒绝补挂并引导先采人',
+      r.ok === false && /聊天窗口或简历详情页/.test(r.error || ''), r.error);
+    check('D/T1 没有向服务端提交任何东西', h.calls.submits.length === 0, String(h.calls.submits.length));
+  }
+
+  // D/T2 槽过期（> 5 分钟）→ 同无槽处理，拒绝
+  {
+    const h = makeHarness({
+      noFields: true,
+      hookAttachments: [hookAttach(REAL_ATTACH_URL)],
+      localExtra: { collect_last_identity: Object.assign({}, SLOT, { ts: Date.now() - 6 * 60 * 1000 }) },
+    });
+    const r = await collect(h, { scene: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    check('D/T2 槽过期时拒绝（不认 5 分钟外的人）',
+      r.ok === false && /纯附件采集/.test(r.error || ''), r.error);
+  }
+
+  // D/T3 主路径：槽命中（URL geekId == 槽的加密形态）→ 补挂成功，身份/岗位全用槽值
+  {
+    const h = makeHarness({
+      noFields: true,
+      hookAttachments: [hookAttach(REAL_ATTACH_URL)],
+      localExtra: { collect_last_identity: SLOT },
+    });
+    const r = await collect(h, { scene: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    check('D/T3 补挂成功', r.ok === true, r.error);
+    const sub = h.calls.submits[0].candidates[0];
+    check('D/T3 主键用槽里的数字 uid（不再拿 URL geekId 当身份）',
+      sub.platformUserId === REAL_UID_GEEK, sub.platformUserId);
+    check('D/T3 备用键带槽里的加密 geekId（服务端双键归一，不分裂）',
+      sub.secondaryPlatformUserId === REAL_ENC_GEEK, sub.secondaryPlatformUserId);
+    check('D/T3 字段为空对象（服务端据此走空字段守卫，不建空版本）',
+      sub.fields && Object.keys(sub.fields).length === 0, JSON.stringify(sub.fields));
+    check('D/T3 岗位 ID 用槽值（本页取不到）', sub.platformJobId === REAL_JOB_ENC, String(sub.platformJobId));
+    check('D/T3 岗位提示用槽值', sub.platformJobHint === SLOT.platformJobHint, String(sub.platformJobHint));
+    check('D/T3 附件并入提交（1 份）',
+      sub.attachments.length === 1 && sub.attachments[0].originUrl === REAL_ATTACH_URL,
+      JSON.stringify(sub.attachments.map((a) => a.originUrl)));
+    check('D/T3 姓名来自槽（toast 显示正确的人）', r.candidateName === '陈诗健', String(r.candidateName));
+    check('D/T3 显式警告补挂来源（HR 有权核对）', /补挂到最近采集的候选人/.test(r.warning || ''), r.warning);
+    check('D/T3 真的发起了下载+上传', h.calls.downloads.length === 1 && h.calls.uploads.length === 1,
+      JSON.stringify(h.calls.downloads));
+  }
+
+  // D/T4 防张冠李戴：附件 URL 的 geekId 是别人的（谢建广）→ 拒绝，绝不挂错人
+  {
+    const h = makeHarness({
+      noFields: true,
+      hookAttachments: [hookAttach(REAL_ATTACH_URL_OTHER)],
+      localExtra: { collect_last_identity: SLOT },
+    });
+    const r = await collect(h, { scene: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    check('D/T4 URL geekId 与槽不符时拒绝（防张冠李戴）',
+      r.ok === false && /不属于最近采集的候选人/.test(r.error || ''), r.error);
+    check('D/T4 没有向服务端提交任何东西', h.calls.submits.length === 0, String(h.calls.submits.length));
+  }
+
+  // D/T5 URL 取不到 geekId（重定向后的裸形态，无 query）→ 信任 5 分钟窗口，补挂 + 警告
+  {
+    const h = makeHarness({
+      noFields: true,
+      hookAttachments: [hookAttach(REAL_ATTACH_URL_BARE)],
+      localExtra: { collect_last_identity: SLOT },
+    });
+    const r = await collect(h, { scene: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    check('D/T5 URL 无 geekId 时信任窗口补挂', r.ok === true, r.error);
+    check('D/T5 身份仍是槽里的人', h.calls.submits[0].candidates[0].platformUserId === REAL_UID_GEEK,
+      h.calls.submits[0].candidates[0].platformUserId);
+    check('D/T5 警告要求核对（无 ID 佐证必须显式告知）', /核对/.test(r.warning || ''), r.warning);
+  }
+
+  // D/T6 槽刷新：补采成功后槽的 ts 被刷新（同一人连续补多份附件不因窗口过期中断）
+  {
+    const h = makeHarness({
+      noFields: true,
+      hookAttachments: [hookAttach(REAL_ATTACH_URL)],
+      localExtra: { collect_last_identity: Object.assign({}, SLOT, { ts: Date.now() - 4 * 60 * 1000 }) },
+    });
+    const beforeTs = h.local.collect_last_identity.ts;
+    await new Promise((res) => setTimeout(res, 5));
+    const r = await collect(h, { scene: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    const after = h.local.collect_last_identity;
+    check('D/T6 补采成功后槽仍保留', r.ok === true && !!after, r.error);
+    check('D/T6 槽被刷新（ts 前移、身份不变）',
+      after && after.ts > beforeTs && after.platformUserId === REAL_UID_GEEK
+        && after.secondary === REAL_ENC_GEEK,
+      JSON.stringify({ beforeTs, after }));
+  }
+
+  // D/T7 常规采集也写槽：聊天页带字段采集成功后，槽里有身份 + 岗位（供 5 分钟内补采用）
+  {
+    const h = makeHarness({
+      sourceUrl: REAL_SOURCE_URL,
+      body: REAL_RESUME_BODY_JOB,
+      jobPairs: [{ num: REAL_JOB_NUM, enc: REAL_JOB_ENC }],
+      extraCaptures: [{ bodyText: REAL_PEER_LIST_BODY, matchedKeyCount: 1 }],
+      attachResponse: () => htmlResponse(),
+    });
+    const r = await collect(h, { scene: 'chat', sourceChannel: 'chat', pageUrl: 'https://www.zhipin.com/web/chat/index' });
+    check('D/T7 常规采集成功', r.ok === true, r.error);
+    const slot = h.local.collect_last_identity;
+    // 该简历体带 encryptUid → 主键取加密形态、备用键取数字 uid（与 D/T3 的数字主键方向互补）
+    check('D/T7 槽写入了主键（该 body 带加密 ID，主键为加密形态）',
+      slot && slot.platformUserId === REAL_ENC_GEEK, JSON.stringify(slot));
+    check('D/T7 槽写入了备用键与姓名',
+      slot && slot.secondary === REAL_UID_GEEK && slot.name === '陈诗健', JSON.stringify(slot));
+    check('D/T7 槽写入了岗位（归一后的加密形态）',
+      slot && slot.platformJobId === REAL_JOB_ENC, JSON.stringify(slot));
+  }
+}
+
 // ============================================================ 执行
 
 (async () => {
   await runPartA();
   runPartB();
   await runPartC();
+  await runPartD();
 
   const pass = results.filter((r) => r.ok).length;
   const fail = results.length - pass;
