@@ -8,7 +8,7 @@ import logging
 from fastapi import FastAPI
 
 from config.settings import get_settings
-from routers import resume
+from routers import jd, resume
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,6 +17,7 @@ logging.basicConfig(
 
 app = FastAPI(title="recruit-ai-service", version="0.1.0")
 app.include_router(resume.router)
+app.include_router(jd.router)
 
 
 @app.get("/health")

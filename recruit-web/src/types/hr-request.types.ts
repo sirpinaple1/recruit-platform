@@ -100,6 +100,26 @@ export const HeadcountPayloadSchema = z.object({
 });
 export type HeadcountPayload = z.infer<typeof HeadcountPayloadSchema>;
 
+/** AI 一键生成 JD 的请求载荷（表单已填岗位要素 + 自由补充的背景描述） */
+export interface JdGeneratePayload {
+  title: string;
+  deptName?: string | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  location?: string | null;
+  education?: string | null;
+  experienceYears?: number | null;
+  employmentType?: string | null;
+  background?: string | null;
+}
+
+export const JdGenerateResultSchema = z.object({
+  jobDescription: z.string().min(1),
+  jobRequirement: z.string(),
+  model: z.string().nullish(),
+});
+export type JdGenerateResult = z.infer<typeof JdGenerateResultSchema>;
+
 // ---------- 展示标签 ----------
 
 export const STATUS_LABELS: Record<HrRequestStatus, string> = {

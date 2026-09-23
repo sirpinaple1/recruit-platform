@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 
-import { createHrRequest, updateHrRequest } from '@/lib/api/hr-request.api';
+import { createHrRequest, generateJd, updateHrRequest } from '@/lib/api/hr-request.api';
 import { ApiError } from '@/lib/httpClient';
 import {
   EDUCATION_OPTIONS,
@@ -62,11 +62,51 @@ const form = ref<FormState>(emptyForm());
 const formError = ref('');
 const saving = ref(false);
 
+/** AI 生成素材与状态（background 不进 FormState：它不随表单保存，仅作生成输入） */
+const jdBackground = ref('');
+const jdGenerating = ref(false);
+const jdError = ref('');
+
+/**
+ * AI 一键生成 JD：以表单已填的岗位要素 + 背景描述为素材，
+ * 结果填回 JD 正文 / 任职要求两栏（不自动保存，HR 确认后走原有保存流程）。
+ */
+async function generateJdFromForm(): Promise<void> {
+  if (jdGenerating.value) return;
+  if (!form.value.title.trim()) {
+    jdError.value = '请先填写岗位名称，再生成 JD';
+    return;
+  }
+  jdGenerating.value = true;
+  jdError.value = '';
+  try {
+    const result = await generateJd({
+      title: form.value.title.trim(),
+      deptName: form.value.deptName.trim() || null,
+      salaryMin: num(form.value.salaryMin),
+      salaryMax: num(form.value.salaryMax),
+      location: form.value.location.trim() || null,
+      education: form.value.education || null,
+      experienceYears: num(form.value.experienceYears),
+      employmentType: form.value.employmentType || null,
+      background: jdBackground.value.trim() || null,
+    });
+    form.value.jobDescription = result.jobDescription;
+    form.value.jobRequirement = result.jobRequirement;
+  } catch (e) {
+    jdError.value = e instanceof ApiError ? e.message : 'JD 生成失败，请稍后重试';
+  } finally {
+    jdGenerating.value = false;
+  }
+}
+
 watch(
   () => props.visible,
   (v) => {
     if (!v) return;
     formError.value = '';
+    jdBackground.value = '';
+    jdError.value = '';
     const next = emptyForm();
     if (props.mode === 'edit' && props.initial) {
       const r = props.initial;
@@ -212,9 +252,25 @@ async function save(): Promise<void> {
         </div>
 
         <div>
-          <label class="mb-1.5 block text-[12.5px] font-medium text-t2">JD 正文 <span class="text-danger">*</span></label>
+          <div class="mb-1.5 flex items-center">
+            <label class="block text-[12.5px] font-medium text-t2">JD 正文 <span class="text-danger">*</span></label>
+            <button
+              class="ml-auto h-7 rounded-md bg-primary px-3 text-[12px] font-medium text-white transition hover:brightness-110 disabled:opacity-50"
+              :disabled="jdGenerating"
+              @click="generateJdFromForm"
+            >
+              {{ jdGenerating ? 'AI 生成中…' : 'AI 生成 JD' }}
+            </button>
+          </div>
+          <textarea
+            v-model="jdBackground"
+            rows="2"
+            class="mb-1.5 w-full rounded-md border border-line bg-[#FAFBFC] px-3 py-2 text-[12.5px] leading-relaxed focus:border-primary focus:outline-none"
+            placeholder="AI 生成素材（可选）：补充业务背景、团队方向、重点项目等，生成内容更具体"
+          ></textarea>
           <textarea v-model="form.jobDescription" rows="6" class="w-full rounded-md border border-line px-3 py-2 text-[13px] leading-relaxed focus:border-primary focus:outline-none" placeholder="岗位职责、工作内容等公开信息（将用于渠道发布预填充）"></textarea>
           <p class="mt-1 text-[11.5px] leading-relaxed text-t4">描述越具体（岗位职责、技术栈、年限要求），发布时渠道的职位类型推荐越准确；过于简短可能不触发平台推荐，至少 30 字。</p>
+          <p v-if="jdError" class="mt-1 text-[11.5px] text-danger">{{ jdError }}</p>
         </div>
 
         <div>

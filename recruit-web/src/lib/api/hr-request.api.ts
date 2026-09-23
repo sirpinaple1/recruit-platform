@@ -7,6 +7,9 @@ import {
   HrRequestSavePayload,
   HrRequestVO,
   HrRequestVOSchema,
+  JdGeneratePayload,
+  JdGenerateResult,
+  JdGenerateResultSchema,
   RejectPayload,
 } from '@/types/hr-request.types';
 
@@ -57,4 +60,9 @@ export function reopenHrRequest(id: string): Promise<HrRequestVO> {
 
 export function updateHeadcount(id: string, payload: HeadcountPayload): Promise<HrRequestVO> {
   return request({ method: 'POST', url: `/hr-requests/${id}/headcount`, data: payload }, HrRequestVOSchema);
+}
+
+/** AI 一键生成 JD（同步等待，LLM 生成约需 5-20 秒；失败抛 ApiError） */
+export function generateJd(payload: JdGeneratePayload): Promise<JdGenerateResult> {
+  return request({ method: 'POST', url: '/hr-requests/jd/generate', data: payload }, JdGenerateResultSchema);
 }

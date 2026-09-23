@@ -2,11 +2,14 @@ package com.recruit.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.recruit.common.R;
+import com.recruit.dto.AiJdRequestDTO;
 import com.recruit.dto.HrRequestCloseDTO;
 import com.recruit.dto.HrRequestHeadcountDTO;
 import com.recruit.dto.HrRequestRejectDTO;
 import com.recruit.dto.HrRequestSaveDTO;
+import com.recruit.service.AiServiceClient;
 import com.recruit.service.HrRequestService;
+import com.recruit.vo.AiJdResultVO;
 import com.recruit.vo.HrRequestVO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class HrRequestController {
 
     private final HrRequestService hrRequestService;
+    private final AiServiceClient aiServiceClient;
 
     // ==================== CRUD ====================
 
@@ -100,6 +104,17 @@ public class HrRequestController {
     public R<HrRequestVO> headcount(@PathVariable Long id, @Valid @RequestBody HrRequestHeadcountDTO dto,
                                     HttpServletRequest request) {
         return R.ok(hrRequestService.updateHeadcount(id, dto.getHeadcountFilled(), currentUserId(request)));
+    }
+
+    // ==================== AI 辅助 ====================
+
+    /**
+     * 一键生成 JD：表单已填的岗位要素 + HR 补充的背景描述 → AI 产出 JD 正文与任职要求。
+     * 不落库：结果由前端填回表单，HR 编辑确认后走原有保存流程。
+     */
+    @PostMapping("/jd/generate")
+    public R<AiJdResultVO.DataBody> generateJd(@Valid @RequestBody AiJdRequestDTO dto) {
+        return R.ok(aiServiceClient.generateJd(dto));
     }
 
     /** 登录态由 AuthInterceptor 保证，此处直接取挂载的 userId */
