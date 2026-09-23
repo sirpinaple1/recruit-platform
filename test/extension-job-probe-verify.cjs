@@ -333,6 +333,81 @@ function records(page) {
     pageE.sentToBg.some((m) => m.type === 'DIAG_GET_FLAG'),
     JSON.stringify(pageE.sentToBg.map((m) => m.type).slice(0, 6)));
 
+  // ==================== P15–P19：发布接口识别（2026-09-23 取证后的新逻辑） ====================
+  // ★ 为什么必须固化这几条 ★
+  //   此前「发布成功」靠猜 toast 选择器（.toast .icon-toast-success）+ 120s 窗口判定，
+  //   而 BOSS 发布后不跳转、该选择器实测从未命中 → 台账永远 pending、映射永远缺失，
+  //   且**没有任何报错**（静默失效）。现在改为听发布接口自己的响应，
+  //   这几条断言就是防止它再退化回「猜」。
+  //   取证样本：Downloads/recruit-job-probe-2026-09-23T01-53-32.json
+  function msgs(page, type) {
+    return page.postedByMain.filter((m) => m && m[NS] === NS_VAL && m.type === type);
+  }
+
+  const SAVE_URL = 'https://www.zhipin.com/wapi/zpjob/job/save?_=1790128400805';
+  const SAVE_OK = {
+    code: 0,
+    message: 'Success',
+    zpData: {
+      blockTitle: '职位发布成功',
+      rescode: 1,
+      jobId: 'a25a740f0f32506a0nN939q1FFpR',
+    },
+  };
+
+  let probeBody = SAVE_OK;
+  const pageF = makePage({ fetchImpl: () => Promise.resolve(makeResponse(probeBody)) });
+  run(pageF.mainSandbox, PROBE);
+
+  await pageF.mainSandbox.window.fetch(SAVE_URL, { method: 'POST' });
+  await flush();
+  const published1 = msgs(pageF, 'JOB_PUBLISHED');
+  check('P15 job/save 成功响应产生且仅产生一条 JOB_PUBLISHED',
+    published1.length === 1, '实际 ' + published1.length + ' 条');
+  check('P15b 岗位 ID 取自 zpData.jobId（取证样本值一致）',
+    published1[0] && published1[0].payload.jobId === 'a25a740f0f32506a0nN939q1FFpR',
+    JSON.stringify(published1[0] && published1[0].payload));
+  check('P15c 标记来源为 zpData.jobId，便于排障时看出 ID 从哪来',
+    published1[0] && published1[0].payload.keyName === 'zpData.jobId',
+    published1[0] && published1[0].payload.keyName);
+  check('P19 发布响应不再走 JOB_HINT 通路（避免与接口信号重复上报）',
+    msgs(pageF, 'JOB_HINT').length === 0,
+    '实际 ' + msgs(pageF, 'JOB_HINT').length + ' 条');
+
+  // 接口 200 但业务失败：绝不能误判成功（误判会占住唯一键，把正确绑定挡在 409 外面）
+  probeBody = { code: 0, zpData: { rescode: 0, jobId: 'a25a740f0f32506a0nN939q1FFpR' } };
+  await pageF.mainSandbox.window.fetch(SAVE_URL, { method: 'POST' });
+  await flush();
+  check('P16 rescode != 1 时不产生 JOB_PUBLISHED（业务层失败不算发布成功）',
+    msgs(pageF, 'JOB_PUBLISHED').length === 1,
+    '实际 ' + msgs(pageF, 'JOB_PUBLISHED').length + ' 条');
+
+  probeBody = { code: 1, message: 'fail', zpData: { rescode: 1, jobId: 'a25a740f0f32506a0nN939q1FFpR' } };
+  await pageF.mainSandbox.window.fetch(SAVE_URL, { method: 'POST' });
+  await flush();
+  check('P17 code != 0 时不产生 JOB_PUBLISHED（HTTP 层失败不算发布成功）',
+    msgs(pageF, 'JOB_PUBLISHED').length === 1,
+    '实际 ' + msgs(pageF, 'JOB_PUBLISHED').length + ' 条');
+
+  // ★ 关键回归：聊天侧接口污染 ★
+  //   实测 chat/geek/info 的响应里也有 jobId + 旁证键，会被判成 strong=true，
+  //   并在发布后 2.9 秒把哨兵手里的岗位 ID 覆盖成**数字形态**的别的岗位。
+  //   错映射比没映射危险得多，必须挡住。
+  probeBody = { code: 0, zpData: { jobId: 577463021, jobName: '某岗位', jobStatus: 1 } };
+  await pageF.mainSandbox.window.fetch('https://www.zhipin.com/wapi/zpjob/chat/geek/info', { method: 'GET' });
+  await flush();
+  check('P18 聊天侧接口不再产生 JOB_HINT（取证实证的污染源已挡掉）',
+    msgs(pageF, 'JOB_HINT').length === 0,
+    '实际 ' + msgs(pageF, 'JOB_HINT').length + ' 条');
+
+  probeBody = { code: 0, zpData: { jobId: 577463021, jobName: '某岗位' } };
+  await pageF.mainSandbox.window.fetch(
+    'https://www.zhipin.com/wapi/zprelation/friend/getBossFriendListV2.json', { method: 'GET' });
+  await flush();
+  check('P18b 好友列表接口同样不产生 JOB_HINT（桥配对归 collect-hook，与发布取证无关）',
+    msgs(pageF, 'JOB_HINT').length === 0,
+    '实际 ' + msgs(pageF, 'JOB_HINT').length + ' 条');
+
   // ==================== 汇总 ====================
   const failed = results.filter((r) => !r.ok);
   for (const r of results) {

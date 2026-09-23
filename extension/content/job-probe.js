@@ -76,6 +76,31 @@
     'jobSalary', 'jobDescription', 'brandName', 'bossName'
   ];
 
+  // ★ 发布接口识别（2026-09-23 真机取证）★
+  //   取证来源：Downloads/recruit-job-probe-2026-09-23T01-53-32.json
+  //   BOSS 发布成功后**不跳转**（停留原页）→ URL 判定这条路根本走不通；
+  //   而配置的 toast 选择器 .toast .icon-toast-success 实测从未命中。
+  //   唯一可靠证据是发布接口自己的响应：
+  //     POST https://www.zhipin.com/wapi/zpjob/job/save
+  //     {"code":0,"zpData":{"rescode":1,"blockTitle":"职位发布成功",
+  //                         "jobId":"a25a740f0f32506a0nN939q1FFpR"}}
+  //   jobId 在 zpData 下，且**是加密形态**（即规范形），可直接入库。
+  //   ⚠️ 键名仍是 jobId —— 与聊天侧同名却装数字形态正好相反，
+  //     所以这里按「接口 + 位置」取值，形态判定一律交给服务端 CollectRules。
+  const PUBLISH_URL_RE = /\/wapi\/zpjob\/job\/save(\?|$|\/)/i;
+
+  // ★ JOB_HINT 污染黑名单（同样是取证实证，不是推测）★
+  //   聊天页这几个接口的响应里也带 jobId + 旁证键，会被 scanForJob 判成 strong=true。
+  //   实测同一次录制里污染 8 次，且发布后仅 2.9 秒就把哨兵手里的岗位 ID
+  //   覆盖成了**数字形态**、还是**别的岗位**的 ID。
+  //   错映射比没映射危险得多（未归类看得见，错归类看不见），故明确挡掉。
+  //   这些接口对「桥配对」仍有用 —— 那是 collect-hook 的职责，与本文件的发布取证无关。
+  //   另：job/save **本身也进黑名单** —— 它的岗位 ID 只在「成功」时才有意义，
+  //   失败响应里那个 jobId（可能是待发布的草稿 ID 或空壳）不该被当成岗位提示走 JOB_HINT，
+  //   否则「发布失败」会被误当成「拿到了岗位 ID」。成功一律走 JOB_PUBLISHED。
+  const JOB_HINT_DENY_RE =
+    /\/(zpjob\/chat\/|zpjob\/view\/geek|zprelation\/friend\/|zpjob\/job\/save)/i;
+
   let rules = compile(DEFAULT_RULES);
   const state = { seen: 0, matched: 0, errors: [], lastAt: null };
 
@@ -285,12 +310,7 @@
         rulesVersion: NS_VAL
       }
     };
-    // 同时投给自己所在帧与顶层帧：发布流程可能发生在 iframe 内，
-    // 而哨兵只注在顶层。同源（zhipin.com）时 top 可达；跨源则跳过，不影响自身帧的投递。
-    try { window.postMessage(payload, '*'); } catch (e) { markError('post-self', e); }
-    try {
-      if (window.top && window.top !== window) window.top.postMessage(payload, '*');
-    } catch (e) { /* 跨源，正常情况，忽略 */ }
+    emit(payload);
   }
 
   function readJson(text, url) {
@@ -301,12 +321,84 @@
     if (c !== 123 && c !== 91) return;
     let body;
     try { body = JSON.parse(s); } catch (e) { return; }
+
+    // 发布接口优先：它是「发布成功」的权威信号，且岗位 ID 就在响应里，
+    // 不依赖任何 DOM 猜测，也不需要 scanForJob 的旁证（该响应里没有旁证键）。
+    const sig = readPublishSignal(body, url);
+    if (sig) { publishSignal(sig, url); return; }
+
     const found = scanForJob(body);
     if (!found) return;
+    // 挡掉聊天侧污染（理由见 JOB_HINT_DENY_RE 处注释）
+    if (JOB_HINT_DENY_RE.test(url || '')) return;
     const urlIsJob = /\/job/i.test(url || '');
     // 弱证据 + 接口不像职位相关 → 丢弃。宁可漏，不可错。
     if (!found.strong && !urlIsJob) return;
     publish(found, url, found.strong);
+  }
+
+  /**
+   * 从发布接口响应里读「发布成功」信号。
+   *
+   * <p>双标志（HTTP 层 code 与业务层 rescode）都要求成功：只认其一会在
+   * 「接口 200 但业务失败」或反之的边界上误判，而误判成功会把一个
+   * 根本没发出去的岗位写进台账，还会占住唯一键（占位式错误最难排查）。</p>
+   *
+   * @returns {{jobId:string, blockTitle:string|null, resmsg:string|null}|null}
+   */
+  function readPublishSignal(body, url) {
+    if (!body || typeof body !== 'object') return null;
+    if (!PUBLISH_URL_RE.test(url || '')) return null;
+    if (body.code !== 0) return null;
+    const z = body.zpData;
+    if (!z || typeof z !== 'object') return null;
+    if (z.rescode !== 1) return null;
+    let jobId = null;
+    if (typeof z.jobId === 'string' && z.jobId.trim()) jobId = z.jobId.trim();
+    else if (typeof z.jobId === 'number') jobId = String(z.jobId);
+    if (!jobId) {
+      // 成功却没给 ID：不该静默 —— 打点后按「无信号」处理（哨兵会继续等 DOM 兜底）
+      markError('publish-no-jobid', new Error('job/save 成功但未返回 jobId'));
+      return null;
+    }
+    return {
+      jobId: jobId,
+      blockTitle: typeof z.blockTitle === 'string' ? z.blockTitle : null,
+      resmsg: typeof z.resmsg === 'string' ? z.resmsg : null
+    };
+  }
+
+  /** 发布成功信号：交给哨兵据此判定成功（见 sentinel.js 的 JOB_PUBLISHED 分支） */
+  function publishSignal(sig, sourceUrl) {
+    state.matched += 1;
+    state.lastAt = Date.now();
+    emit({
+      [NS]: NS_VAL,
+      type: 'JOB_PUBLISHED',
+      payload: {
+        jobId: sig.jobId,
+        keyName: 'zpData.jobId',
+        hint: sig.blockTitle || sig.resmsg || null,
+        // 接口识别本身就是最强证据，不走旁证逻辑
+        strong: true,
+        sourceUrl: String(sourceUrl || '').slice(0, 1024),
+        pageUrl: safeHref(),
+        ts: Date.now(),
+        rulesVersion: NS_VAL
+      }
+    });
+  }
+
+  /**
+   * 投递消息：同时投给本帧与顶层帧。
+   * 发布流程可能发生在 iframe 内，而哨兵只注在顶层；同源时 top 可达，
+   * 跨源则跳过，不影响自身帧的投递。
+   */
+  function emit(payload) {
+    try { window.postMessage(payload, '*'); } catch (e) { markError('post-self', e); }
+    try {
+      if (window.top && window.top !== window) window.top.postMessage(payload, '*');
+    } catch (e) { /* 跨源，正常情况，忽略 */ }
   }
 
   // ============================================================ fetch

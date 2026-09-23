@@ -184,10 +184,77 @@ check(
   String(w4.sandbox.window['recruit-sentinel-active'])
 );
 
-let failed = 0;
-for (const r of results) {
-  console.log((r.ok ? '✅' : '❌') + ' ' + r.name + (r.extra ? '  → ' + r.extra : ''));
-  if (!r.ok) failed++;
+// —— T14–T16：发布接口信号驱动哨兵回填（2026-09-23 取证后的新逻辑）——
+// ★ 为什么必须固化这几条 ★
+//   旧的「发布成功」判定 = toast 选择器 + 120s 固定窗口。BOSS 发布后不跳转
+//   （urlPattern 无从判定），而 .toast .icon-toast-success 实测从未命中，
+//   结果是台账永远 pending、岗位映射永远缺失，且**全程无报错**。
+//   现在改为听发布接口（job/save）的响应，下面几条就是防止它再退化回「猜 DOM」。
+const w5 = makeWorld();
+w5.sandbox.document = { body: {}, querySelector: () => null };
+w5.sandbox.MutationObserver = class { observe() {} };
+w5.win.location.href = 'https://www.zhipin.com/web/frame/job/publish-edit?encryptId=0';
+// 成功配置故意保留旧的 toast 选择器：T15 要证明「即使它匹配不上，接口信号也能回填」
+w5.sandbox.window.__RECRUIT_SENTINEL_CONFIG__ = {
+  // ★ 必须是字符串 ★ 雪花 ID 超过 2^53，写成数字字面量会静默丢精度
+  //   （实测 2102576864096415745 → 2102576864096415700）。
+  //   后端 PublishRecordVO.id 也是按字符串返回的，这里与真实链路保持一致。
+  recordId: '2102576864096415745',
+  successConfig: { selectors: ['.toast .icon-toast-success'], timeoutMs: 120000 },
+  platformTabId: 1,
+};
+
+let err5 = null;
+try {
+  run(w5.sandbox, SENTINEL);
+} catch (e) {
+  err5 = String((e && e.message) || e);
 }
-console.log(failed === 0 ? '\n全部通过（' + results.length + ' 项）' : `\n失败 ${failed} 项`);
-process.exit(failed === 0 ? 0 : 1);
+check('T14 带配置注入 sentinel 不抛错', err5 === null, err5);
+
+// 探针在 MAIN 世界捕获到 job/save 成功响应后发的信号
+w5.sandbox.window.postMessage({
+  __recruit_job_probe: 'v1',
+  type: 'JOB_PUBLISHED',
+  payload: {
+    jobId: 'a25a740f0f32506a0nN939q1FFpR',
+    keyName: 'zpData.jobId',
+    hint: '职位发布成功',
+    strong: true,
+    ts: Date.now(),
+  },
+});
+
+(async () => {
+  // reportSuccess 内部 await 了 sendMessage，需放行微任务
+  await new Promise((r) => setTimeout(r, 10));
+
+  const reports = w5.sentToBg.filter((m) => m.type === 'SENTINEL_REPORT');
+  check('T15 发布接口信号命中即触发回填（不依赖 toast 选择器匹配）',
+    reports.length === 1, '实际 ' + reports.length + ' 条');
+  check('T15b 回填带上发布响应里的加密岗位 ID',
+    reports[0] && reports[0].payload.platformJobId === 'a25a740f0f32506a0nN939q1FFpR',
+    JSON.stringify(reports[0] && reports[0].payload));
+  check('T15c 岗位 ID 来源标记为接口，便于排障',
+    reports[0] && reports[0].payload.platformJobSource === 'api:job/save',
+    reports[0] && reports[0].payload.platformJobSource);
+
+  // 再来一次同信号（比如页面重发），不能重复回填
+  w5.sandbox.window.postMessage({
+    __recruit_job_probe: 'v1',
+    type: 'JOB_PUBLISHED',
+    payload: { jobId: 'a25a740f0f32506a0nN939q1FFpR', ts: Date.now() },
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  check('T16 重复信号不重复回填（reported 幂等）',
+    w5.sentToBg.filter((m) => m.type === 'SENTINEL_REPORT').length === 1,
+    '实际 ' + w5.sentToBg.filter((m) => m.type === 'SENTINEL_REPORT').length + ' 条');
+
+  let failed = 0;
+  for (const r of results) {
+    console.log((r.ok ? '✅' : '❌') + ' ' + r.name + (r.extra ? '  → ' + r.extra : ''));
+    if (!r.ok) failed++;
+  }
+  console.log(failed === 0 ? '\n全部通过（' + results.length + ' 项）' : `\n失败 ${failed} 项`);
+  process.exit(failed === 0 ? 0 : 1);
+})();

@@ -61,6 +61,21 @@ const PROBE_NS_VAL = 'v1';
 let jobHintFromProbe = null;
 
 /**
+ * ★ 发布接口（job/save）给的权威岗位 ID ★
+ *
+ * 与 jobHintFromProbe 分开存是刻意的：后者会被任何含 jobId 的响应刷新，
+ * 而发布接口信号只能出现一次、且它就是本次发布的岗位本身。
+ * 取岗位 ID 时它优先级最高，避免被后来的无关响应覆盖成别的岗位。
+ */
+let publishedJobId = null;
+let publishedJobHint = null;
+
+/** 发布接口信号到达时由 startSentinel 注册的回调（见下方 JOB_PUBLISHED 分支） */
+let onPublishedSignal = null;
+/** 最近一次发布接口信号（供 startSentinel 补消费「先到后注入」的情况） */
+let lastPublishedSignal = null;
+
+/**
  * 岗位 ID 合法性（与 job-probe.js / CollectService.looksEncryptedId 同口径）。
  * 保守：宁可拿不到（回落人工绑定），也不要把埋点里的无关数字当岗位 ID 上报。
  */
@@ -115,6 +130,15 @@ function jobIdFromDom() {
  * 而不是猜一个近似岗（错误归类比未归类危险）。
  */
 function collectPlatformJobId() {
+  // 发布接口给的 ID 优先级最高：它就是本次发布的岗位本身，
+  // 不可能像 jobHintFromProbe 那样被后来的无关响应覆盖成别的岗位。
+  if (publishedJobId) {
+    return {
+      platformJobId: publishedJobId,
+      platformJobHint: publishedJobHint || null,
+      platformJobSource: 'api:job/save',
+    };
+  }
   if (jobHintFromProbe && jobHintFromProbe.jobId) {
     return {
       platformJobId: jobHintFromProbe.jobId,
@@ -143,9 +167,28 @@ if (window[SENTINEL_ID]) {
     try {
       const d = ev.data;
       if (!d || typeof d !== 'object' || d[PROBE_NS] !== PROBE_NS_VAL) return;
-      if (d.type !== 'JOB_HINT' || !d.payload || !d.payload.jobId) return;
-      jobHintFromProbe = d.payload;
-      console.log('[Sentinel] 收到探针岗位提示:', d.payload.jobId, d.payload.keyName);
+      const p = d.payload;
+      if (!p || !p.jobId) return;
+
+      // ★ JOB_PUBLISHED：发布接口（job/save）的响应 —— 权威信号 ★
+      //   它同时解决两件事：
+      //     ① 成功判定不再依赖 toast 选择器（实测从未命中，且发布后不跳转、
+      //        urlPattern 也无从判定）；
+      //     ② 岗位 ID 直接来自发布响应本身，天然是加密规范形，不会被
+      //        聊天侧接口污染成数字形态或别的岗位。
+      //   详见 job-probe.js 的 PUBLISH_URL_RE 注释（2026-09-23 真机取证）。
+      if (d.type === 'JOB_PUBLISHED') {
+        publishedJobId = String(p.jobId).trim();
+        publishedJobHint = p.hint || null;
+        lastPublishedSignal = p;
+        console.log('[Sentinel] 收到发布接口成功信号:', publishedJobId, '|', p.hint || '');
+        if (typeof onPublishedSignal === 'function') onPublishedSignal(p);
+        return;
+      }
+
+      if (d.type !== 'JOB_HINT') return;
+      jobHintFromProbe = p;
+      console.log('[Sentinel] 收到探针岗位提示:', p.jobId, p.keyName);
     } catch (e) { /* 探针消息异常绝不能影响哨兵 */ }
   }, false);
 
@@ -175,6 +218,27 @@ function startSentinel(config) {
   let selectorMatched = false;
   let reported = false;
   let startTime = Date.now();
+  /** 发布接口已确认成功 —— 权威信号，命中即不再要求 DOM 双命中 */
+  let publishedByApi = false;
+
+  // 注册回调：探针在 MAIN 世界捕获到 job/save 成功响应后走这条。
+  // 放在这里（而非模块级）是为了能拿到上面的 reported / startTime 做去重与时效判断。
+  onPublishedSignal = (p) => {
+    if (reported) return;
+    // 忽略本次任务启动前很久的陈旧信号（页面可能残留上一次发布的信号）
+    if (p && p.ts && startTime - p.ts > 60 * 1000) {
+      console.log('[Sentinel] 忽略陈旧的发布接口信号');
+      return;
+    }
+    publishedByApi = true;
+    checkAndReport();
+  };
+
+  // 信号可能先于哨兵注入到达（注入有延迟），这里补消费一次
+  if (lastPublishedSignal && (!lastPublishedSignal.ts || startTime - lastPublishedSignal.ts <= 60 * 1000)) {
+    console.log('[Sentinel] 复用先到的发布接口信号');
+    publishedByApi = true;
+  }
   
   // 检查 URL 是否匹配（简单通配符）
   function checkUrlMatch() {
@@ -215,7 +279,17 @@ function startSentinel(config) {
   // 双命中判定 + 自动回填
   function checkAndReport() {
     if (reported) return;
-    
+
+    // 发布接口信号是权威证据：命中即成功，不再要求 DOM 双命中。
+    // 原因（2026-09-23 取证）：BOSS 发布后不跳转（urlPattern 无从判定），
+    // 而配置的 toast 选择器 .toast .icon-toast-success 实测从未命中。
+    if (publishedByApi) {
+      console.log('[Sentinel] 发布接口信号已确认，跳过 DOM 判定直接回填');
+      reported = true;
+      reportSuccess();
+      return;
+    }
+
     // 保守策略：要求双命中（或单方无配置）
     const urlOk = !urlPattern || urlMatched;
     const selectorOk = !selectors || selectors.length === 0 || selectorMatched;
@@ -257,6 +331,8 @@ function startSentinel(config) {
   // 初始检查
   checkUrlMatch();
   checkSelectorMatch();
+  // 若注入前已拿到发布接口信号（或此刻刚到），立即回填，不必等 DOM
+  if (publishedByApi) checkAndReport();
   
   // 监听 URL 变化（SPA 路由）
   let lastUrl = window.location.href;
@@ -280,7 +356,15 @@ function startSentinel(config) {
     if (reported || Date.now() - startTime > timeout) {
       clearInterval(selectorCheckInterval);
       if (!reported) {
-        console.log('[Sentinel] 超时未检测到成功信号，停止监听');
+        // ★ 刻意**不**上报 failed ★
+        //   发布由人手动触发（插件不自动点发布，这是既定设计），等多久完全取决于人，
+        //   固定窗口必然时灵时不灵。而一旦把台账标成 failed，它就终结了 ——
+        //   之后真正的发布接口信号到达时也无法再回填（report 只对 pending 生效），
+        //   等于**堵死**了正确的信号，比继续等下去更糟。
+        //   所以这里只停掉 DOM 轮询（省资源）；message 监听仍在，
+        //   发布接口响应任何时候到达都能触发回填。
+        console.log('[Sentinel] DOM 监听窗口已过（' + Math.round(timeout / 1000)
+                    + 's），停止 DOM 轮询；仍在监听发布接口（job/save）响应');
       }
       return;
     }
