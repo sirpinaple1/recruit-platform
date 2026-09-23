@@ -408,6 +408,57 @@ function records(page) {
     msgs(pageF, 'JOB_HINT').length === 0,
     '实际 ' + msgs(pageF, 'JOB_HINT').length + ' 条');
 
+  // ★ 真实全量样本回归（2026-09-23 02:38:47 真机发布成功）★
+  //   取证：Downloads/recruit-job-probe-2026-09-23T02-39-08.json
+  //   与上面精简样本的区别：这是 BOSS 实际返回的**完整 720 字符响应体**，
+  //   里面还夹着 itemInfo.buttonPcUrl（内含 encryptJobId=...）、auditStatus、
+  //   jobAuditingInfo 等一堆噪声。用它验证两点：
+  //     ① 带查询串的 job/save URL（?_=<时间戳>）依然能被 PUBLISH_URL_RE 认出来；
+  //     ② 响应里的旁证噪声不会因为走了 JOB_HINT 而被重复上报。
+  const REAL_SAVE_URL = 'https://www.zhipin.com/wapi/zpjob/job/save?_=1790131126642';
+  const REAL_SAVE_OK = {
+    code: 0,
+    message: 'Success',
+    zpData: {
+      blockTitle: '职位发布成功',
+      publishScene: 0,
+      overseasMaterialsHunterDialog: null,
+      itemInfo: {
+        itemType: 50,
+        flag: 9,
+        encryptUserItemId: null,
+        buttonPcUrl: 'bosszp://bosszhipin.pc/openPage?type=openDialog&dialogName=business'
+          + '&itemType=50&encryptItemType=c3f585bdcd21660b0nQ~&buyOrConsume=buy'
+          + '&source=emergency_top_card~post_position&buyScene=1&fromSource=job'
+          + '&encryptJobId=77e562372f28e26c0nN93t25EVpW',
+      },
+      resmsg: '职位已发布成功',
+      blockVipRenewTip: null,
+      rescode: 1,
+      jobId: '77e562372f28e26c0nN93t25EVpW',
+      buyQuickTop: 0,
+      disabledPromoteDialog: null,
+      qualityCertHighlightDialog: null,
+      auditStatus: 6,
+      jobAuditingInfo: { promise: '职位审核通过后可以招募牛人。', remind: '' },
+    },
+  };
+  const pubBefore = msgs(pageF, 'JOB_PUBLISHED').length;
+  const hintBefore = msgs(pageF, 'JOB_HINT').length;
+  probeBody = REAL_SAVE_OK;
+  await pageF.mainSandbox.window.fetch(REAL_SAVE_URL, { method: 'POST' });
+  await flush();
+  const realPub = msgs(pageF, 'JOB_PUBLISHED');
+  check('P20 真实全量响应（720 字符、含 buttonPcUrl 噪声）仍产生且仅产生一条 JOB_PUBLISHED',
+    realPub.length === pubBefore + 1,
+    '实际新增 ' + (realPub.length - pubBefore) + ' 条');
+  check('P20b 真实样本岗位 ID 与落库值一致（77e562372f28e26c0nN93t25EVpW）',
+    realPub[realPub.length - 1] && realPub[realPub.length - 1].payload.jobId === '77e562372f28e26c0nN93t25EVpW',
+    JSON.stringify(realPub[realPub.length - 1] && realPub[realPub.length - 1].payload));
+  check('P20c 响应里的 encryptJobId 噪声不额外产生 JOB_HINT',
+    msgs(pageF, 'JOB_HINT').length === hintBefore,
+    '实际 ' + msgs(pageF, 'JOB_HINT').length + ' 条（基线 ' + hintBefore + '）');
+
   // ==================== 汇总 ====================
   const failed = results.filter((r) => !r.ok);
   for (const r of results) {
